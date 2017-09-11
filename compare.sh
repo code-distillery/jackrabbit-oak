@@ -56,12 +56,13 @@ for file in $CHANGED_FILES; do
         for i in "${OLD_PATH}" "${NEW_PATH}"; do
             sed -i'.orig' -E 's/ servicefactory="false"//g'    "${i}"
             sed -i'.bak'  -E 's/type="String" //g'             "${i}"
+            sed -i'.bak'  -E 's/( id=".*)\$Configuration/\1/g' "${i}"
             sed -i'.bak'  -E 's/ xmlns:(scr|metatype)=".*"//g' "${i}" && \
             sed -i'.bak'  -E 's/(<\/?)(scr|metatype):/\1/g'    "${i}"
             echo "${i}" | grep -q 'metatype' && sed -i'.bak'  -E 's/(name|description)=".*"/\1="\[\[noise\]\]"/g' "${i}"
         done
         mkdir -p "diffs/${FILE_DIR}"
-        DIFF_FILE="diffs/${FILE_DIR}/${FILE_NAME}.diff" 
+        DIFF_FILE="diffs/${FILE_DIR}/${FILE_NAME}.diff"
         python xmldiffs.py "${OLD_PATH}" "${NEW_PATH}" > "${DIFF_FILE}"
         
         cat "${DIFF_FILE}" >> diffs.log
