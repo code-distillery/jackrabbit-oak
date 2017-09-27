@@ -69,7 +69,7 @@ import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Lists.newCopyOnWriteArrayList;
 import static org.apache.jackrabbit.oak.spi.security.RegistrationConstants.OAK_SECURITY_NAME;
 
-@Component
+@Component(immediate=true)
 @Designate(ocd = SecurityProviderRegistration.Configuration.class)
 @SuppressWarnings("unused")
 public class SecurityProviderRegistration {
@@ -141,8 +141,8 @@ public class SecurityProviderRegistration {
     //----------------------------------------------------< SCR integration >---
 
     @Activate
-    public void activate(BundleContext context, Map<String, Object> configuration) {
-        String[] requiredServicePids = getRequiredServicePids(configuration);
+    public void activate(BundleContext context, Configuration configuration) {
+        String[] requiredServicePids = configuration.requiredServicePids();
 
         synchronized (this) {
             for (String pid : requiredServicePids) {
@@ -151,14 +151,14 @@ public class SecurityProviderRegistration {
 
             this.context = context;
         }
-        this.authorizationConfiguration.withCompositionType(getAuthorizationCompositionType(configuration));
+        this.authorizationConfiguration.withCompositionType(configuration.authorizationCompositionType());
 
         maybeRegister();
     }
 
     @Modified
-    public void modified(Map<String, Object> configuration) {
-        String[] requiredServicePids = getRequiredServicePids(configuration);
+    public void modified(Configuration configuration) {
+        String[] requiredServicePids = configuration.requiredServicePids();
 
         synchronized (this) {
             preconditions.clearPreconditions();
@@ -167,7 +167,7 @@ public class SecurityProviderRegistration {
                 preconditions.addPrecondition(pid);
             }
         }
-        this.authorizationConfiguration.withCompositionType(getAuthorizationCompositionType(configuration));
+        this.authorizationConfiguration.withCompositionType(configuration.authorizationCompositionType());
 
         maybeUnregister();
         maybeRegister();
@@ -591,14 +591,5 @@ public class SecurityProviderRegistration {
             return servicePid;
         }
         return PropertiesUtil.toString(properties.get(OAK_SECURITY_NAME), null);
-    }
-
-    private static String[] getRequiredServicePids(Map<String, Object> configuration) {
-        return PropertiesUtil.toStringArray(configuration.get("requiredServicePids"), new String[]{});
-    }
-
-    @Nonnull
-    private static String getAuthorizationCompositionType(Map<String, Object> properties) {
-        return PropertiesUtil.toString(properties.get("authorizationCompositionType"), "AND");
     }
 }
