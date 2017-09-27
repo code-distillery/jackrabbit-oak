@@ -25,9 +25,9 @@ import org.osgi.service.component.annotations.Component;
 
 import static com.google.common.collect.Sets.newHashSet;
 import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
-import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_NAMESPACES;
-import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_NSDATA;
-import static org.apache.jackrabbit.oak.plugins.name.NamespaceConstants.REP_PREFIXES;
+import static org.apache.jackrabbit.oak.spi.namespace.NamespaceConstants.REP_NAMESPACES;
+import static org.apache.jackrabbit.oak.spi.namespace.NamespaceConstants.REP_NSDATA;
+import static org.apache.jackrabbit.oak.spi.namespace.NamespaceConstants.REP_PREFIXES;
 
 /**
  * Validator service that checks that all node and property names as well

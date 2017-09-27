@@ -28,8 +28,8 @@ import javax.jcr.security.AccessControlManager;
 
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.plugins.name.NamespaceConstants;
-import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
+import org.apache.jackrabbit.oak.spi.namespace.NamespaceConstants;
+import org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.plugins.version.VersionablePathHook;
 import org.apache.jackrabbit.oak.security.authorization.accesscontrol.AccessControlImporter;
 import org.apache.jackrabbit.oak.security.authorization.accesscontrol.AccessControlManagerImpl;
@@ -117,7 +117,7 @@ public class AuthorizationConfigurationImpl extends ConfigurationBase implements
     }
 
     @Reference
-    private MountInfoProvider mountInfoProvider;
+    private MountInfoProvider mountInfoProvider = Mounts.defaultMountInfoProvider();
 
     public AuthorizationConfigurationImpl() {
         super();
@@ -131,8 +131,6 @@ public class AuthorizationConfigurationImpl extends ConfigurationBase implements
 
     public AuthorizationConfigurationImpl(SecurityProvider securityProvider) {
         super(securityProvider, securityProvider.getParameters(NAME));
-        mountInfoProvider = getParameters().getConfigValue(AccessControlConstants.PARAM_MOUNT_PROVIDER,
-                Mounts.defaultMountInfoProvider(), MountInfoProvider.class);
     }
 
     //----------------------------------------------< SecurityConfiguration >---
@@ -208,5 +206,13 @@ public class AuthorizationConfigurationImpl extends ConfigurationBase implements
             return new PermissionProviderImpl(root, workspaceName, principals, getRestrictionProvider(),
                     getParameters(), ctx);
         }
+    }
+
+    public void bindMountInfoProvider(MountInfoProvider mountInfoProvider) {
+        this.mountInfoProvider = mountInfoProvider;
+    }
+
+    public void unbindMountInfoProvider(MountInfoProvider mountInfoProvider) {
+        this.mountInfoProvider = null;
     }
 }

@@ -29,6 +29,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import java.io.InputStream;
 import java.util.UUID;
 
 import com.google.common.base.Charsets;
@@ -57,17 +58,19 @@ public class ResponseDecoderTest {
 
         String blobId = "blobId";
         byte mask = createMask(1, 1);
-        ByteBuf buf = createBlobChunkBuffer(Messages.HEADER_BLOB, blobId, blobData, mask);
+        ByteBuf buf = createBlobChunkBuffer(Messages.HEADER_BLOB, 3L, blobId, blobData, mask);
 
         EmbeddedChannel channel = new EmbeddedChannel(new ResponseDecoder());
         channel.writeInbound(buf);
         GetBlobResponse response = (GetBlobResponse) channel.readInbound();
         assertEquals("blobId", response.getBlobId());
         assertEquals(blobData.length, response.getLength());
-        byte[] receivedData = IOUtils.toByteArray(response.getInputStream());
-        assertArrayEquals(blobData, receivedData);
+        try (InputStream is = response.getInputStream()) {
+            byte[] receivedData = IOUtils.toByteArray(is);
+            assertArrayEquals(blobData, receivedData);
+        }
     }
-    
+
     @Test
     public void shouldDecodeValidTwoChunksGetBlobResponses() throws Exception {
         byte[] blobData = new byte[] {1, 2, 3, 4};
@@ -77,10 +80,10 @@ public class ResponseDecoderTest {
         String blobId = "blobId";
         
         byte firstMask = createMask(1, 2);
-        ByteBuf firstBuf = createBlobChunkBuffer(Messages.HEADER_BLOB, blobId, firstChunkData, firstMask);
+        ByteBuf firstBuf = createBlobChunkBuffer(Messages.HEADER_BLOB, 4L, blobId, firstChunkData, firstMask);
         
         byte secondMask = createMask(2, 2);
-        ByteBuf secondBuf = createBlobChunkBuffer(Messages.HEADER_BLOB, blobId, secondChunkbData, secondMask);
+        ByteBuf secondBuf = createBlobChunkBuffer(Messages.HEADER_BLOB, 4L, blobId, secondChunkbData, secondMask);
 
         EmbeddedChannel channel = new EmbeddedChannel(new ResponseDecoder());
         channel.writeInbound(firstBuf);
@@ -102,12 +105,13 @@ public class ResponseDecoderTest {
         byte mask = createMask(1, 1);
 
         ByteBuf buf = Unpooled.buffer();
-        buf.writeInt(1 + 1 + 4 + blobIdBytes.length + 8 + blobData.length);
+        buf.writeInt(1 + 1 + 8 + 4 + blobIdBytes.length + 8 + blobData.length);
         buf.writeByte(Messages.HEADER_BLOB);
         buf.writeByte(mask);
+        buf.writeLong(3L);
         buf.writeInt(blobIdBytes.length);
         buf.writeBytes(blobIdBytes);
-        buf.writeLong(hash(mask, blobData) + 1);
+        buf.writeLong(hash(mask, 3L, blobData) + 1);
         buf.writeBytes(blobData);
 
         EmbeddedChannel channel = new EmbeddedChannel(new ResponseDecoder());

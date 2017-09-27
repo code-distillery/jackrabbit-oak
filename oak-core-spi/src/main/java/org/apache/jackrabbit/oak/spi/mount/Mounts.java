@@ -93,7 +93,7 @@ public final class Mounts {
 
         @Override
         public String getName() {
-            return "";
+            return "<default>";
         }
 
         @Override
@@ -113,6 +113,11 @@ public final class Mounts {
 
         @Override
         public boolean isSupportFragment(String path) {
+            return false;
+        }
+
+        @Override
+        public boolean isSupportFragmentUnder(String path) {
             return false;
         }
 
