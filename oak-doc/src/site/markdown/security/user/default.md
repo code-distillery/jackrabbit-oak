@@ -88,9 +88,11 @@ group membership related methods. See also [Principal Management](../principal.h
 #### Reading Authorizables
 
 ##### Handling of the Authorizable ID
-* As of Oak the node type definition of `rep:Authorizable` defines a new property `rep:authorizableId` which is intended to store the ID of a user or group.
+* As of Oak 1.0 the node type definition of `rep:Authorizable` defines a new property `rep:authorizableId` which is intended to store the ID of a user or group.
+* This property is protected and system maintained and cannot be changed after creation through user management API calls.
 * The default implementation comes with a dedicated property index for `rep:authorizableId` which asserts the uniqueness of that ID.
-* `Authorizable#getID` returns the string value contained in `rep:authorizableID` and for backwards compatibility falls back on the node name in case the ID property is missing.
+* For backwards compatibility with Jackrabbit 2.x the ID specified during creation is also reflected in the `jcr:uuid` (protected and mandatory), which is used for the lookup. 
+* `Authorizable#getID` returns the string value contained in `rep:authorizableID` and for backwards compatibility falls back on the node name in case the `rep:authorizableId` property is missing.
 * The name of the authorizable node is generated based on a configurable implementation of the `AuthorizableNodeName` interface (see configuration section below). By default it uses the ID as name hint and includes a conversion to a valid JCR node name.
 
 ##### equals() and hashCode()
@@ -218,7 +220,7 @@ The corresponding errors are all of type `Constraint` with the following codes:
 | 0028              | Attempt to create outside of configured scope            |
 | 0029              | Intermediate folders not rep:AuthorizableFolder          |
 | 0030              | Missing uuid for group (check for cyclic membership)     |
-| 0031              | Cyclic group membership                                  |
+| <s>0031</s>        | <s>Cyclic group membership</s> (see [OAK-6072])         |
 | 0032              | Attempt to set password with system user                 |
 | 0033              | Attempt to add rep:pwd node to a system user             |
 
@@ -251,6 +253,7 @@ as of OAK 1.0:
 | `PARAM_PASSWORD_INITIAL_CHANGE`     | boolean | false                                        |
 | `PARAM_PASSWORD_HISTORY_SIZE`       | int (upper limit: 1000) | 0                            |
 | `PARAM_CACHE_EXPIRATION`            | long    | 0                                            |
+| `PARAM_ENABLE_RFC7613_USERCASE_MAPPED_PROFILE`| boolean | false                              |
 | | | |
 
 The following configuration parameters present with the default implementation in Jackrabbit 2.x are no longer supported and will be ignored:
@@ -272,10 +275,10 @@ Within the default user management implementation the following parts can be
 modified or extended at runtime by providing corresponding OSGi services or passing
 appropriate configuration parameters exposing the custom implementations:
 
-- `AuthorizableActionProvider`: Defines the authorizable actions, see [Authorizable Actions](user/authorizableaction.html).
+- `AuthorizableActionProvider`: Defines the authorizable actions, see [Authorizable Actions](authorizableaction.html).
 - `AuthorizableNodeName`: Defines the generation of the authorizable node names
   in case the user management implementation stores user information in the repository.
-  See [Authorizable Node Name Generation](user/authorizablenodename.html).
+  See [Authorizable Node Name Generation](authorizablenodename.html).
 - `UserAuthenticationFactory`: see below
    
 #### UserAuthenticationFactory : Authenticating Users
@@ -324,3 +327,4 @@ implementation.
 [UserConfiguration]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/user/UserConfiguration.html
 [UserAuthenticationFactory]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/user/UserAuthenticationFactory.html
 [Authentication]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/authentication/Authentication.html
+[OAK-6072]: https://issues.apache.org/jira/browse/OAK-6072

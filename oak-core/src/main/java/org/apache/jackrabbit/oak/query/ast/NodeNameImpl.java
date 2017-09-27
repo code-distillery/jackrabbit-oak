@@ -30,8 +30,9 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.JcrNameParser;
 import org.apache.jackrabbit.oak.query.QueryImpl;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryConstants;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex.OrderEntry;
 import org.apache.jackrabbit.util.ISO9075;
 
 /**
@@ -78,6 +79,9 @@ public class NodeNameImpl extends DynamicOperandImpl {
     @Override
     public PropertyValue currentProperty() {
         String path = selector.currentPath();
+        if (path == null) {
+            return null;
+        }
         String name = PathUtils.getName(path);
         // TODO reverse namespace remapping?
         return PropertyValues.newName(name);
@@ -86,6 +90,10 @@ public class NodeNameImpl extends DynamicOperandImpl {
     @Override
     public void restrict(FilterImpl f, Operator operator, PropertyValue v) {
         if (v == null) {
+            return;
+        }
+        if (operator == Operator.NOT_EQUAL && v != null) {
+            // not supported
             return;
         }
         String name = getName(query, v);
@@ -100,6 +108,14 @@ public class NodeNameImpl extends DynamicOperandImpl {
     @Override
     public void restrictList(FilterImpl f, List<PropertyValue> list) {
         // optimizations of type "NAME(..) IN(A, B)" are not supported
+    }
+
+    @Override
+    public String getFunction(SelectorImpl s) {
+        if (!s.equals(selector)) {
+            return null;
+        }
+        return "@" + QueryConstants.RESTRICTION_NAME;
     }
 
     @Override
@@ -128,7 +144,13 @@ public class NodeNameImpl extends DynamicOperandImpl {
         // Name escaping (convert _x0020_ to space)
         name = ISO9075.decode(name);
         // normalize paths (./name > name)
-        name = PropertyValues.getOakPath(name, query.getNamePathMapper());
+        if (query.getNamePathMapper() != null) {
+            String mappedName = query.getNamePathMapper().getOakPath(name);
+            if (mappedName == null) {
+                throw new IllegalArgumentException("Not a valid JCR name: " + name);
+            }
+            name = mappedName;
+        }
         if (PathUtils.isAbsolute(name)) {
             throw new IllegalArgumentException("Not a valid JCR name: "
                     + name + " (absolute paths are not names)");
@@ -155,6 +177,19 @@ public class NodeNameImpl extends DynamicOperandImpl {
     @Override
     public DynamicOperandImpl createCopy() {
         return new NodeNameImpl(selectorName);
+    }
+    
+    @Override
+    public OrderEntry getOrderEntry(SelectorImpl s, OrderingImpl o) {
+        if (!s.equals(selector)) {
+            // ordered by a different selector
+            return null;
+        }
+        return new OrderEntry(
+                QueryConstants.RESTRICTION_NAME, 
+            Type.STRING, 
+            o.isDescending() ? 
+            OrderEntry.Order.DESCENDING : OrderEntry.Order.ASCENDING);
     }
 
 }

@@ -86,6 +86,12 @@ var oak = (function(global){
      * @returns {number} the number of children, including all descendant nodes.
      */
     api.countChildren = function(path){
+        if (path === undefined) {
+            return 0;
+        } else if (path != "/") {
+            path = path + "/";
+        }
+
         var depth = pathDepth(path);
         var totalCount = 0;
         while (true) {
@@ -130,6 +136,10 @@ var oak = (function(global){
      *        parameter of the function.
      */
     api.forEachChild = function(path, callable) {
+        if (path !== undefined && path != "/") {
+            path = path + "/";
+        }
+
         var depth = pathDepth(path);
         while (true) {
             var cur = db.nodes.find({_id: pathFilter(depth++, path)});
@@ -201,6 +211,45 @@ var oak = (function(global){
         result.bsonSize = Math.round(bsonSize / (1024 * 1024));
         result.indexSize = stats.totalIndexSize;
         return result;
+    };
+
+    /**
+     * Find and dumps _id of all documents where the document size exceeds
+     * 15MB size. It also dumps progress info after every 10k docs.
+     *
+     * The ids can be found by grepping for '^id|' pattern
+     *
+     * > oak.dumpLargeDocIds({db: "aem-author"})
+     *
+     * @param {object} options pass optional parameters for host, port, db, and filename
+     */
+    api.dumpLargeDocIds = function (options) {
+        options = options || {};
+        var sizeLimit = options.sizeLimit || 15 * 1024 * 1024;
+        var count = 0;
+        var ids = [];
+        print("Using size limit: " +  sizeLimit);
+        db.nodes.find().forEach(function (doc) {
+            var size = Object.bsonsize(doc);
+            if (size > sizeLimit) {
+                print("id|" + doc._id);
+                ids.push(doc._id)
+            }
+            if (++count % 10000 === 0) {
+                print("Traversed #" + count)
+            }
+        });
+
+        print("Number of large documents : " + ids.length);
+
+        //Dump the export command to dump all such large docs
+        if (ids.length > 0) {
+            var query = JSON.stringify({_id: {$in: ids}});
+            print("Using following export command to tweak the output");
+
+            options.db = db.getName();
+            print(createExportCommand(query, options));
+        }
     };
 
     /**
@@ -569,23 +618,7 @@ var oak = (function(global){
      */
 
     api.printMongoExportCommand = function (path, options) {
-        options = options || {};
-        var host = options.host || "127.0.0.1";
-        var port = options.port || "27017";
-        var db = options.db || "oak";
-        var filename = options.filename || "all-required-nodes.json"
-
-        var query = JSON.stringify(getDocAndHierarchyQuery(path));
-
-        var mongoExportCommand = "mongoexport"
-                                    + " --host " + host
-                                    + " --port " + port
-                                    + " --db " + db
-                                    + " --collection nodes"
-                                    + " --out " + filename
-                                    + " --query '" + query + "'";
-
-        return mongoExportCommand;
+        return createExportCommand(JSON.stringify(getDocAndHierarchyQuery(path)), options);
     };
 
     /**
@@ -630,6 +663,22 @@ var oak = (function(global){
     };
 
     //~--------------------------------------------------< internal >
+
+    var createExportCommand = function (query, options) {
+        options = options || {};
+        var host = options.host || "127.0.0.1";
+        var port = options.port || "27017";
+        var db = options.db || "oak";
+        var filename = options.filename || "all-required-nodes.json"
+
+        return "mongoexport"
+            + " --host " + host
+            + " --port " + port
+            + " --db " + db
+            + " --collection nodes"
+            + " --out " + filename
+            + " --query '" + query + "'";
+    };
 
     var checkOrFixDeepHistory = function(path, fix, prepare, verbose) {
         if (prepare) {

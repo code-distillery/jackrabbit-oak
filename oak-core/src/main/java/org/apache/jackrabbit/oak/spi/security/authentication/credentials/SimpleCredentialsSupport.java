@@ -29,8 +29,9 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 
 /**
- * Implementation of the {@code SupportedCredentials} interface that handles
- * {@link javax.jcr.SimpleCredentials}.
+ * Implementation of the
+ * {@link org.apache.jackrabbit.oak.spi.security.authentication.credentials.CredentialsSupport}
+ * interface that handles {@link javax.jcr.SimpleCredentials}.
  */
 public final class SimpleCredentialsSupport implements CredentialsSupport {
 
@@ -72,6 +73,19 @@ public final class SimpleCredentialsSupport implements CredentialsSupport {
             });
         } else {
             return Collections.emptyMap();
+        }
+    }
+
+    @Override
+    public boolean setAttributes(@Nonnull Credentials credentials, @Nonnull Map<String, ?> attributes) {
+        if (credentials instanceof SimpleCredentials) {
+            SimpleCredentials sc = (SimpleCredentials) credentials;
+            for (Map.Entry<String, ?> entry : attributes.entrySet()) {
+                sc.setAttribute(entry.getKey(), entry.getValue());
+            }
+            return true;
+        } else {
+            return false;
         }
     }
 }

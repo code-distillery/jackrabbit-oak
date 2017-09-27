@@ -17,21 +17,26 @@
 package org.apache.jackrabbit.oak.jcr;
 
 import java.util.Properties;
-
 import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
-import javax.jcr.Session;
 
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
 import org.apache.jackrabbit.oak.plugins.document.DocumentNodeStore;
 import org.apache.jackrabbit.oak.plugins.document.MongoUtils;
 import org.apache.jackrabbit.oak.plugins.document.util.MongoConnection;
-import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 
 /**
  * A repository stub using the DocumentNodeStore.
  */
 public class OakMongoNSRepositoryStub extends OakRepositoryStub {
+
+    static {
+        MongoConnection c = MongoUtils.getConnection();
+        if (c != null) {
+            MongoUtils.dropCollections(c.getDB());
+            c.close();
+        }
+    }
 
     private final MongoConnection connection;
     private final Repository repository;
@@ -44,7 +49,6 @@ public class OakMongoNSRepositoryStub extends OakRepositoryStub {
      */
     public OakMongoNSRepositoryStub(Properties settings) throws RepositoryException {
         super(settings);
-        Session session = null;
         final DocumentNodeStore store;
         try {
             this.connection = MongoUtils.getConnection();
@@ -53,19 +57,12 @@ public class OakMongoNSRepositoryStub extends OakRepositoryStub {
                     setPersistentCache("target/persistentCache,time").
                     setMongoDB(connection.getDB()).
                     getNodeStore();
-            QueryEngineSettings qs = new QueryEngineSettings();
-            qs.setFullTextComparisonWithoutIndex(true);
-            this.repository = new Jcr(store).with(qs).createRepository();
-
-            session = getRepository().login(superuser);
-            TestContentLoader loader = new TestContentLoader();
-            loader.loadTestContent(session);
+            Jcr jcr = new Jcr(store);
+            preCreateRepository(jcr);
+            this.repository = jcr.createRepository();
+            loadTestContent(repository);
         } catch (Exception e) {
             throw new RepositoryException(e);
-        } finally {
-            if (session != null) {
-                session.logout();
-            }
         }
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             @Override

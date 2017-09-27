@@ -37,6 +37,7 @@ import javax.jcr.Value;
 import javax.jcr.ValueFactory;
 import javax.jcr.ValueFormatException;
 import javax.jcr.nodetype.PropertyDefinition;
+import javax.jcr.version.OnParentVersionAction;
 import javax.jcr.version.VersionException;
 
 import org.apache.jackrabbit.oak.api.Tree.Status;
@@ -44,7 +45,7 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.jcr.delegate.NodeDelegate;
 import org.apache.jackrabbit.oak.jcr.delegate.PropertyDelegate;
 import org.apache.jackrabbit.oak.jcr.session.operation.PropertyOperation;
-import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
+import org.apache.jackrabbit.oak.plugins.value.jcr.ValueFactoryImpl;
 import org.apache.jackrabbit.value.ValueHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,7 +114,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!getParent().isCheckedOut()) {
+                if (!getParent().isCheckedOut() && getDefinition().getOnParentVersion() != OnParentVersionAction.IGNORE) {
                     throw new VersionException(
                             "Cannot set property. Node is checked in.");
                 }
@@ -463,7 +464,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!getParent().isCheckedOut()) {
+                if (!getParent().isCheckedOut() && getDefinition().getOnParentVersion() != OnParentVersionAction.IGNORE) {
                     throw new VersionException(
                             "Cannot set property. Node is checked in.");
                 }
@@ -499,7 +500,7 @@ public class PropertyImpl extends ItemImpl<PropertyDelegate> implements Property
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!getParent().isCheckedOut()) {
+                if (!getParent().isCheckedOut() && getDefinition().getOnParentVersion() != OnParentVersionAction.IGNORE) {
                     throw new VersionException(
                             "Cannot set property. Node is checked in.");
                 }

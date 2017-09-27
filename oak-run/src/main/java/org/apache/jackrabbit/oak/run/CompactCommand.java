@@ -17,12 +17,12 @@
 
 package org.apache.jackrabbit.oak.run;
 
-import static org.apache.jackrabbit.oak.plugins.segment.FileStoreHelper.openFileStore;
+import static com.google.common.collect.Sets.difference;
+import static com.google.common.collect.Sets.newHashSet;
 
 import java.io.File;
-import java.io.RandomAccessFile;
-import java.util.Arrays;
-import java.util.concurrent.Callable;
+import java.util.Date;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Stopwatch;
@@ -31,9 +31,7 @@ import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
 import org.apache.commons.io.FileUtils;
 import org.apache.jackrabbit.oak.commons.IOUtils;
-import org.apache.jackrabbit.oak.plugins.segment.compaction.CompactionStrategy;
-import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
-import org.apache.jackrabbit.oak.plugins.segment.file.JournalReader;
+import org.apache.jackrabbit.oak.run.commons.Command;
 
 class CompactCommand implements Command {
 
@@ -42,8 +40,19 @@ class CompactCommand implements Command {
         OptionParser parser = new OptionParser();
         OptionSpec<String> directoryArg = parser.nonOptions(
                 "Path to segment store (required)").ofType(String.class);
-        OptionSpec<Void> forceFlag = parser.accepts(
-                "force", "Force compaction and ignore non matching segment version");
+        OptionSpec<Boolean> mmapArg = parser.accepts("mmap",
+                "Use memory mapped access if true, use file access if false. " +
+                        "If not specified memory mapped access is used on 64 bit systems " +
+                        "and file access is used on 32 bit systems.")
+                .withOptionalArg()
+                .ofType(Boolean.class);
+        OptionSpec<Boolean> forceArg = parser.accepts("force",
+                "Force compaction and ignore a non matching segment store version. " +
+                        "CAUTION: this will upgrade the segment store to the latest version, " +
+                        "which is incompatible with older versions of Oak.")
+                .withOptionalArg()
+                .ofType(Boolean.class);
+
         OptionSet options = parser.parse(args);
 
         String path = directoryArg.value(options);
@@ -52,82 +61,74 @@ class CompactCommand implements Command {
             parser.printHelpOn(System.err);
             System.exit(-1);
         }
-        Stopwatch watch = Stopwatch.createStarted();
-        FileStore store = openFileStore(path, options.has(forceFlag));
+
         File directory = new File(path);
-        try {
-            boolean persistCM = Boolean.getBoolean("tar.PersistCompactionMap");
-            System.out.println("Compacting " + directory);
-            System.out.println("    before " + Arrays.toString(directory.list()));
-            long sizeBefore = FileUtils.sizeOfDirectory(directory);
-            System.out.println("    size "
-                    + IOUtils.humanReadableByteCount(sizeBefore) + " (" + sizeBefore
-                    + " bytes)");
 
-            System.out.println("    -> compacting");
+        boolean success = false;
+        Set<String> beforeLs = newHashSet();
+        Set<String> afterLs = newHashSet();
+        Stopwatch watch = Stopwatch.createStarted();
 
-            CompactionStrategy compactionStrategy = new CompactionStrategy(
-                    false, CompactionStrategy.CLONE_BINARIES_DEFAULT,
-                    CompactionStrategy.CleanupType.CLEAN_ALL, 0,
-                    CompactionStrategy.MEMORY_THRESHOLD_DEFAULT) {
-                @Override
-                public boolean compacted(Callable<Boolean> setHead)
-                        throws Exception {
-                    // oak-run is doing compaction single-threaded
-                    // hence no guarding needed - go straight ahead
-                    // and call setHead
-                    return setHead.call();
-                }
-            };
-            compactionStrategy.setOfflineCompaction(true);
-            compactionStrategy.setPersistCompactionMap(persistCM);
-            store.setCompactionStrategy(compactionStrategy);
-            store.compact();
-        } finally {
-            store.close();
+        Boolean mmap = mmapArg.value(options);
+        System.out.println("Compacting " + directory);
+        if (mmap == null) {
+            System.out.println("With default access mode");
+        } else if (mmap) {
+            System.out.println("With memory mapped access");
+        } else {
+            System.out.println("With file access");
         }
 
-        System.out.println("    -> cleaning up");
-        store = openFileStore(path, false);
-        try {
-            for (File file : store.cleanup()) {
-                if (!file.exists() || file.delete()) {
-                    System.out.println("    -> removed old file " + file.getName());
-                } else {
-                    System.out.println("    -> failed to remove old file " + file.getName());
-                }
-            }
+        boolean force = isTrue(forceArg.value(options));
 
-            String head;
-            File journal = new File(directory, "journal.log");
-            JournalReader journalReader = new JournalReader(journal);
-            try {
-                head = journalReader.iterator().next() + " root " + System.currentTimeMillis()+"\n";
-            } finally {
-                journalReader.close();
-            }
-
-            RandomAccessFile journalFile = new RandomAccessFile(journal, "rw");
-            try {
-                System.out.println("    -> writing new " + journal.getName() + ": " + head);
-                journalFile.setLength(0);
-                journalFile.writeBytes(head);
-                journalFile.getChannel().force(false);
-            } finally {
-                journalFile.close();
-            }
-        } finally {
-            store.close();
-        }
-        watch.stop();
-        System.out.println("    after  "
-                + Arrays.toString(directory.list()));
-        long sizeAfter = FileUtils.sizeOfDirectory(directory);
+        System.out.println("    before ");
+        beforeLs.addAll(list(directory));
+        long sizeBefore = FileUtils.sizeOfDirectory(directory);
         System.out.println("    size "
-                + IOUtils.humanReadableByteCount(sizeAfter) + " (" + sizeAfter
+                + IOUtils.humanReadableByteCount(sizeBefore) + " (" + sizeBefore
                 + " bytes)");
-        System.out.println("    duration  " + watch.toString() + " ("
-                + watch.elapsed(TimeUnit.SECONDS) + "s).");
+        System.out.println("    -> compacting");
+
+        try {
+            SegmentTarUtils.compact(directory, mmap, force);
+            success = true;
+        } catch (Throwable e) {
+            System.out.println("Compaction failure stack trace:");
+            e.printStackTrace(System.out);
+        } finally {
+            watch.stop();
+            if (success) {
+                System.out.println("    after ");
+                afterLs.addAll(list(directory));
+                long sizeAfter = FileUtils.sizeOfDirectory(directory);
+                System.out.println("    size "
+                        + IOUtils.humanReadableByteCount(sizeAfter) + " ("
+                        + sizeAfter + " bytes)");
+                System.out.println("    removed files " + difference(beforeLs, afterLs));
+                System.out.println("    added files " + difference(afterLs, beforeLs));
+                System.out.println("Compaction succeeded in " + watch.toString()
+                        + " (" + watch.elapsed(TimeUnit.SECONDS) + "s).");
+            } else {
+                System.out.println("Compaction failed in " + watch.toString()
+                        + " (" + watch.elapsed(TimeUnit.SECONDS) + "s).");
+                System.exit(1);
+            }
+        }
+    }
+
+    private static boolean isTrue(Boolean value) {
+        return value != null && value;
+    }
+
+    private static Set<String> list(File directory) {
+        Set<String> files = newHashSet();
+        for (File f : directory.listFiles()) {
+            String d = new Date(f.lastModified()).toString();
+            String n = f.getName();
+            System.out.println("        " + d + ", " + n);
+            files.add(n);
+        }
+        return files;
     }
 
 }

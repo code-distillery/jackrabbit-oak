@@ -23,11 +23,26 @@ import static com.google.common.base.Objects.equal;
 import static java.lang.Boolean.parseBoolean;
 import static java.lang.System.getenv;
 
+import com.google.common.base.StandardSystemProperty;
+
 /**
  * Utility class for ITs to determine the environment running in.
  */
 public final class CIHelper {
-    private CIHelper() { }
+
+    private CIHelper() {
+        // Prevent instantiation.
+    }
+
+    /**
+     * Check if this process is running on Jenkins.
+     *
+     * @return {@code true} if this process is running on Jenkins, {@code false}
+     * otherwise.
+     */
+    public static boolean jenkins() {
+        return getenv("JENKINS_URL") != null;
+    }
 
     /**
      * @return  {@code true} iff running on
@@ -59,6 +74,26 @@ public final class CIHelper {
      */
     public static boolean travisIntegrationTesting() {
         return equal(getenv("PROFILE"), "integrationTesting");
+    }
+
+    public static boolean jenkinsNodeLabel(String label) {
+        String labels = getenv("NODE_LABELS");
+        if (labels == null) {
+            return false;
+        }
+        for (String l: labels.trim().split("\\s+")) {
+            if (l.equals(label)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @return  {@code true} iff running in a Windows environment
+     */
+    public static boolean windows() {
+        return StandardSystemProperty.OS_NAME.value().toLowerCase().contains("windows");
     }
 
 }

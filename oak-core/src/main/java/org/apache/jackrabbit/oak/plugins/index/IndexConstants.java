@@ -35,6 +35,10 @@ public interface IndexConstants {
 
     String REINDEX_ASYNC_PROPERTY_NAME = "reindex-async";
 
+    String INDEXING_MODE_SYNC = "sync";
+
+    String INDEXING_MODE_NRT = "nrt";
+
     String ASYNC_PROPERTY_NAME = "async";
 
     String ASYNC_REINDEX_VALUE = "async-reindex";
@@ -42,6 +46,22 @@ public interface IndexConstants {
     String ENTRY_COUNT_PROPERTY_NAME = "entryCount";
 
     String KEY_COUNT_PROPERTY_NAME = "keyCount";
+    
+    /**
+     * The regular expression pattern of the values to be indexes.
+     */
+    String VALUE_PATTERN = "valuePattern";
+
+    /**
+     * A list of prefixes to be excluded from the index.
+     */
+    String VALUE_EXCLUDED_PREFIXES = "valueExcludedPrefixes";
+    
+    /**
+     * A list of prefixes to be included from the index.
+     * Include has higher priority than exclude.
+     */
+    String VALUE_INCLUDED_PREFIXES = "valueIncludedPrefixes";
 
     /**
      * Marks a unique property index.
@@ -69,8 +89,34 @@ public interface IndexConstants {
     String QUERY_PATHS = "queryPaths";
 
     /**
-     * Hidden property which stores the indexPath which can be used by
-     * IndexEditors
+     * Property name for indicating that given index is corrupt and should be excluded
+     * from further indexing. Its value is the date when this index was marked as
+     * corrupt
      */
-    String INDEX_PATH = ":indexPath";
+    String CORRUPT_PROPERTY_NAME = "corrupt";
+
+    /**
+     * CommitInfo attribute name which refers to the time at which
+     * async index checkpoint is created i.e. time upto which repository
+     * state is being indexed in given indexing cycle.
+     *
+     * The time is in string for as per Type.DATE
+     */
+    String CHECKPOINT_CREATION_TIME = "indexingCheckpointTime";
+    
+    /**
+     * The index tag hint (when using "option(index tagged x, y)", this is IN("x", "y"))
+     */
+    String INDEX_TAG_OPTION = ":indexTag";
+
+    /**
+     * The tags property in the index definition.
+     */
+    String INDEX_TAGS = "tags";
+
+    /**
+     * The index name hint (when using "option(index abc)", this is "abc")
+     */
+    String INDEX_NAME_OPTION = ":indexName";
+
 }

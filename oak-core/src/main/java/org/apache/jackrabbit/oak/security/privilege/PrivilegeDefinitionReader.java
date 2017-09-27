@@ -27,7 +27,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeDefinition;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeUtil;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 
 /**
  * Reads privilege definitions from the repository content without applying
@@ -48,7 +48,7 @@ class PrivilegeDefinitionReader implements PrivilegeConstants {
      */
     @Nonnull
     Map<String, PrivilegeDefinition> readDefinitions() {
-        Map<String, PrivilegeDefinition> definitions = new HashMap<String, PrivilegeDefinition>();
+        Map<String, PrivilegeDefinition> definitions = new HashMap();
         for (Tree child : privilegesTree.getChildren()) {
             if (isPrivilegeDefinition(child)) {
                 PrivilegeDefinition def = PrivilegeUtil.readDefinition(child);
@@ -66,7 +66,7 @@ class PrivilegeDefinitionReader implements PrivilegeConstants {
      *         if the name doesn't refer to a registered privilege.
      */
     @CheckForNull
-    PrivilegeDefinition readDefinition(String privilegeName) {
+    PrivilegeDefinition readDefinition(@Nonnull String privilegeName) {
         if (!privilegesTree.exists() || !privilegesTree.hasChild(privilegeName)) {
             return null;
         } else {

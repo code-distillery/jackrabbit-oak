@@ -31,7 +31,7 @@ import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
+import org.apache.jackrabbit.oak.plugins.value.jcr.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapIdentityProvider;
 import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapProviderConfig;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProvider;
@@ -162,7 +162,7 @@ public abstract class LdapLoginTestBase extends ExternalLoginModuleTestBase {
     }
 
     @Override
-    protected void destroyIDP(ExternalIdentityProvider idp) {
+    protected void destroyIDP() {
         ((LdapIdentityProvider) idp).close();
     }
 
@@ -274,7 +274,7 @@ public abstract class LdapLoginTestBase extends ExternalLoginModuleTestBase {
             cs = login(new SimpleCredentials(USER_ID, USER_PWD.toCharArray()));
 
             root.refresh();
-             user = userManager.getAuthorizable(USER_ID);
+            user = userManager.getAuthorizable(USER_ID);
             assertNotNull(user);
             assertTrue(user.hasProperty(USER_PROP));
             assertNull(userManager.getAuthorizable(GROUP_DN));

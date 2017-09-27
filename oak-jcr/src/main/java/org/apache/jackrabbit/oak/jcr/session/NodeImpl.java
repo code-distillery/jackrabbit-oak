@@ -27,7 +27,7 @@ import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
 import static org.apache.jackrabbit.oak.jcr.session.SessionImpl.checkIndexOnName;
-import static org.apache.jackrabbit.oak.util.TreeUtil.getNames;
+import static org.apache.jackrabbit.oak.plugins.tree.TreeUtil.getNames;
 
 import java.io.InputStream;
 import java.math.BigDecimal;
@@ -61,6 +61,7 @@ import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.NodeDefinition;
 import javax.jcr.nodetype.NodeType;
 import javax.jcr.nodetype.NodeTypeManager;
+import javax.jcr.version.OnParentVersionAction;
 import javax.jcr.version.Version;
 import javax.jcr.version.VersionException;
 import javax.jcr.version.VersionHistory;
@@ -89,10 +90,10 @@ import org.apache.jackrabbit.oak.jcr.version.VersionHistoryImpl;
 import org.apache.jackrabbit.oak.jcr.version.VersionImpl;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeType;
+import org.apache.jackrabbit.oak.spi.nodetype.EffectiveNodeType;
 import org.apache.jackrabbit.oak.plugins.tree.RootFactory;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.apache.jackrabbit.value.ValueHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1364,7 +1365,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!isCheckedOut()) {
+                if (!isCheckedOut() && getOPV(dlg.getTree(), state) != OnParentVersionAction.IGNORE) {
                     throw new VersionException(format(
                             "Cannot set property. Node [%s] is checked in.", getNodePath()));
                 }
@@ -1400,7 +1401,7 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!isCheckedOut()) {
+                if (!isCheckedOut() && getOPV(dlg.getTree(), state) != OnParentVersionAction.IGNORE) {
                     throw new VersionException(format(
                             "Cannot set property. Node [%s] is checked in.", getNodePath()));
                 }
@@ -1444,7 +1445,10 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
             @Override
             public void checkPreconditions() throws RepositoryException {
                 super.checkPreconditions();
-                if (!isCheckedOut()) {
+                PropertyDelegate property = dlg.getPropertyOrNull(oakName);
+                if (property != null &&
+                        !isCheckedOut() &&
+                        getOPV(dlg.getTree(), property.getPropertyState()) != OnParentVersionAction.IGNORE) {
                     throw new VersionException(format(
                             "Cannot remove property. Node [%s] is checked in.", getNodePath()));
                 }
@@ -1597,6 +1601,13 @@ public class NodeImpl<T extends NodeDelegate> extends ItemImpl<T> implements Nod
      */
     private String getNodePath(){
         return dlg.getPath();
+    }
+
+    private int getOPV(Tree nodeTree, PropertyState property)
+            throws RepositoryException {
+        return getNodeTypeManager().getDefinition(nodeTree,
+                property, false).getOnParentVersion();
+
     }
 
     private static class PropertyIteratorDelegate {

@@ -19,6 +19,8 @@
 
 package org.apache.jackrabbit.oak.run.osgi;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -63,8 +65,6 @@ import org.osgi.framework.SynchronousBundleListener;
 import org.osgi.util.tracker.ServiceTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * RepositoryFactory which constructs an instance of Oak repository. Thi factory supports following

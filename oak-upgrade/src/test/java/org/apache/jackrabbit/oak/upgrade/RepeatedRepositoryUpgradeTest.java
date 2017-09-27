@@ -18,14 +18,26 @@
  */
 package org.apache.jackrabbit.oak.upgrade;
 
+import static org.apache.jackrabbit.oak.segment.file.FileStoreBuilder.fileStoreBuilder;
+
+import java.io.File;
+import java.io.IOException;
+
+import javax.annotation.Nonnull;
+import javax.jcr.NamespaceRegistry;
+import javax.jcr.Node;
+import javax.jcr.RepositoryException;
+import javax.jcr.Session;
+
 import org.apache.jackrabbit.api.JackrabbitWorkspace;
 import org.apache.jackrabbit.api.security.authorization.PrivilegeManager;
 import org.apache.jackrabbit.commons.JcrUtils;
 import org.apache.jackrabbit.core.RepositoryContext;
 import org.apache.jackrabbit.core.RepositoryImpl;
 import org.apache.jackrabbit.core.config.RepositoryConfig;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
-import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
+import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
+import org.apache.jackrabbit.oak.segment.file.FileStore;
+import org.apache.jackrabbit.oak.segment.file.InvalidFileStoreVersionException;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
@@ -33,14 +45,6 @@ import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
-import javax.annotation.Nonnull;
-import javax.jcr.NamespaceRegistry;
-import javax.jcr.Node;
-import javax.jcr.RepositoryException;
-import javax.jcr.Session;
-import java.io.File;
-import java.io.IOException;
 
 /**
  * Test case to simulate an incremental upgrade, where a source repository is
@@ -58,7 +62,7 @@ public class RepeatedRepositoryUpgradeTest extends AbstractRepositoryUpgradeTest
 
     @Override
     protected NodeStore createTargetNodeStore() {
-        return SegmentNodeStore.builder(fileStore).build();
+        return SegmentNodeStoreBuilders.builder(fileStore).build();
     }
 
     @BeforeClass
@@ -66,10 +70,12 @@ public class RepeatedRepositoryUpgradeTest extends AbstractRepositoryUpgradeTest
         final File dir = new File(getTestDirectory(), "segments");
         dir.mkdirs();
         try {
-            fileStore = FileStore.builder(dir).withMaxFileSize(128).build();
+            fileStore = fileStoreBuilder(dir).withMaxFileSize(128).build();
             upgradeComplete = false;
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } catch (InvalidFileStoreVersionException e) {
+            throw new IllegalStateException(e);
         }
     }
 

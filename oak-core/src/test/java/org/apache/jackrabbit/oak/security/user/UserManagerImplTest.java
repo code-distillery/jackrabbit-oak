@@ -286,8 +286,11 @@ public class UserManagerImplTest extends AbstractSecurityTest {
     public void testFindWithNullValue() throws RepositoryException {
         Iterator<Authorizable> result = userMgr.findAuthorizables(UserConstants.REP_PRINCIPAL_NAME, null);
         assertTrue(result.hasNext());
+    }
 
-        result = userMgr.findAuthorizables("./"+UserConstants.REP_PRINCIPAL_NAME, null);
+    @Test
+    public void testFindWithNullValue2() throws RepositoryException {
+        Iterator<Authorizable> result = userMgr.findAuthorizables("./" + UserConstants.REP_PRINCIPAL_NAME, null);
         assertTrue(result.hasNext());
     }
 

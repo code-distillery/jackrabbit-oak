@@ -29,7 +29,8 @@ import javax.jcr.nodetype.PropertyDefinition;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeType;
+import org.apache.jackrabbit.oak.api.PropertyState;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
 
 /**
  * Information about a property being imported. This class is used
@@ -132,10 +133,14 @@ public class PropInfo {
         return type;
     }
 
+    public boolean isUnknownMultiple() {
+        return multipleStatus == MultipleStatus.UNKNOWN;
+    }
+
     @Nonnull
     public TextValue getTextValue() throws RepositoryException {
         if (multipleStatus == MultipleStatus.MULTIPLE) {
-            throw new RepositoryException("TODO");
+            throw new RepositoryException("Multiple import values with single-valued property definition");
         }
         return values.get(0);
     }
@@ -148,7 +153,7 @@ public class PropInfo {
     @Nonnull
     public Value getValue(int targetType) throws RepositoryException {
         if (multipleStatus == MultipleStatus.MULTIPLE) {
-            throw new RepositoryException("TODO");
+            throw new RepositoryException("Multiple import values with single-valued property definition");
         }
         return values.get(0).getValue(targetType);
     }
@@ -166,32 +171,14 @@ public class PropInfo {
         }
     }
 
-    //TODO check multivalue handling
-    public PropertyDefinition getPropertyDef(EffectiveNodeType ent) {
-        Iterable<PropertyDefinition> definitions = ent.getNamedPropertyDefinitions(getName());
-        int knownType = getType();
-        for (PropertyDefinition def : definitions) {
-            int requiredType = def.getRequiredType();
-            if ((requiredType == PropertyType.UNDEFINED || knownType == PropertyType.UNDEFINED || requiredType == knownType)
-                    && (def.isMultiple() || multipleStatus == MultipleStatus.UNKNOWN)) {
-                return def;
-            }
+    public PropertyState asPropertyState(@Nonnull PropertyDefinition propertyDefinition) throws RepositoryException {
+        List<Value> vs = getValues(getTargetType(propertyDefinition));
+        PropertyState propertyState;
+        if (vs.size() == 1 && !propertyDefinition.isMultiple()) {
+            propertyState = PropertyStates.createProperty(name, vs.get(0));
+        } else {
+            propertyState = PropertyStates.createProperty(name, vs);
         }
-        definitions = ent.getResidualPropertyDefinitions();
-        for (PropertyDefinition def : definitions) {
-            int requiredType = def.getRequiredType();
-            if ((requiredType == PropertyType.UNDEFINED || knownType == PropertyType.UNDEFINED || requiredType == knownType)
-                    && !def.isMultiple() && multipleStatus == MultipleStatus.UNKNOWN) {
-                return def;
-            }
-        }
-        for (PropertyDefinition def : definitions) {
-            int requiredType = def.getRequiredType();
-            if ((requiredType == PropertyType.UNDEFINED || knownType == PropertyType.UNDEFINED || requiredType == knownType)
-                    && def.isMultiple()) {
-                return def;
-            }
-        }
-        return null;
+        return propertyState;
     }
 }

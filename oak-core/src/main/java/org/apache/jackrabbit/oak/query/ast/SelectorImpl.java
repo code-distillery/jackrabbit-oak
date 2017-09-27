@@ -20,18 +20,11 @@ package org.apache.jackrabbit.oak.query.ast;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.Lists.newArrayList;
-import static com.google.common.collect.Sets.newHashSet;
-import static org.apache.jackrabbit.JcrConstants.JCR_ISMIXIN;
 import static org.apache.jackrabbit.JcrConstants.JCR_MIXINTYPES;
-import static org.apache.jackrabbit.JcrConstants.JCR_NODETYPENAME;
 import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
 import static org.apache.jackrabbit.JcrConstants.NT_BASE;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
 import static org.apache.jackrabbit.oak.api.Type.NAMES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_MIXIN_SUBTYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_NAMED_SINGLE_VALUED_PROPERTIES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_PRIMARY_SUBTYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.REP_SUPERTYPES;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,14 +40,17 @@ import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.oak.query.QueryImpl;
-import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
+import org.apache.jackrabbit.oak.query.QueryOptions;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
 import org.apache.jackrabbit.oak.query.plan.SelectorExecutionPlan;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
-import org.apache.jackrabbit.oak.spi.query.Cursors;
+import org.apache.jackrabbit.oak.plugins.index.Cursors;
+import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
+import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.AdvancedQueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
@@ -91,7 +87,7 @@ public class SelectorImpl extends SourceImpl {
     /**
      * The node type associated with the {@link #nodeTypeName}
      */
-    private final NodeState nodeType;
+    private final NodeTypeInfo nodeTypeInfo;
 
     private final String selectorName;
 
@@ -163,21 +159,20 @@ public class SelectorImpl extends SourceImpl {
     private Tree lastTree;
     private String lastPath;
 
-    public SelectorImpl(NodeState nodeType, String selectorName) {
-        this.nodeType = checkNotNull(nodeType);
+    public SelectorImpl(NodeTypeInfo nodeTypeInfo, String selectorName) {
+        this.nodeTypeInfo = checkNotNull(nodeTypeInfo);
         this.selectorName = checkNotNull(selectorName);
 
-        this.nodeTypeName = nodeType.getName(JCR_NODETYPENAME);
+        this.nodeTypeName = nodeTypeInfo.getNodeTypeName();
         this.matchesAllTypes = NT_BASE.equals(nodeTypeName);
 
         if (!this.matchesAllTypes) {
-            this.supertypes = newHashSet(nodeType.getNames(REP_SUPERTYPES));
+            this.supertypes = nodeTypeInfo.getSuperTypes();
             supertypes.add(nodeTypeName);
 
-            this.primaryTypes = newHashSet(nodeType
-                    .getNames(REP_PRIMARY_SUBTYPES));
-            this.mixinTypes = newHashSet(nodeType.getNames(REP_MIXIN_SUBTYPES));
-            if (nodeType.getBoolean(JCR_ISMIXIN)) {
+            this.primaryTypes = nodeTypeInfo.getPrimarySubTypes();
+            this.mixinTypes = nodeTypeInfo.getMixinSubTypes();
+            if (nodeTypeInfo.isMixin()) {
                 mixinTypes.add(nodeTypeName);
             } else {
                 primaryTypes.add(nodeTypeName);
@@ -229,7 +224,7 @@ public class SelectorImpl extends SourceImpl {
     }
 
     public Iterable<String> getWildcardColumns() {
-        return nodeType.getNames(REP_NAMED_SINGLE_VALUED_PROPERTIES);
+        return nodeTypeInfo.getNamesSingleValuesProperties();
     }
 
     @Override
@@ -394,10 +389,10 @@ public class SelectorImpl extends SourceImpl {
         for (ColumnImpl c : query.getColumns()) {
             if (c.getSelector().equals(this)) {
                 String columnName = c.getColumnName();
-                if (columnName.equals(QueryImpl.REP_EXCERPT) || columnName.equals(QueryImpl.OAK_SCORE_EXPLANATION)) {
+                if (columnName.equals(QueryConstants.REP_EXCERPT) || columnName.equals(QueryConstants.OAK_SCORE_EXPLANATION)) {
                     f.restrictProperty(columnName, Operator.NOT_EQUAL, null);
-                } else if (columnName.startsWith(QueryImpl.REP_FACET)) {
-                    f.restrictProperty(QueryImpl.REP_FACET, Operator.EQUAL, PropertyValues.newString(columnName));
+                } else if (columnName.startsWith(QueryConstants.REP_FACET)) {
+                    f.restrictProperty(QueryConstants.REP_FACET, Operator.EQUAL, PropertyValues.newString(columnName));
                 }
             }
         }
@@ -419,7 +414,17 @@ public class SelectorImpl extends SourceImpl {
         for (ConstraintImpl constraint : selectorConstraints) {
             constraint.restrict(f);
         }
-
+        QueryOptions options = query.getQueryOptions();
+        if (options != null) {
+            if (options.indexName != null) {
+                f.restrictProperty(IndexConstants.INDEX_NAME_OPTION, 
+                        Operator.EQUAL, PropertyValues.newString(options.indexName));
+            }
+            if (options.indexTag != null) {
+                f.restrictProperty(IndexConstants.INDEX_TAG_OPTION, 
+                        Operator.EQUAL, PropertyValues.newString(options.indexTag));
+            }
+        }
         return f;
     }
 
@@ -427,6 +432,7 @@ public class SelectorImpl extends SourceImpl {
     public boolean next() {
         while (cursor != null && cursor.hasNext()) {
             scanCount++;
+            query.getQueryExecutionStats().scan(1, scanCount);
             currentRow = cursor.next();
             if (isParent) {
                 // we must not check whether the _parent_ is readable
@@ -656,7 +662,7 @@ public class SelectorImpl extends SourceImpl {
         if ((t == null || !t.exists()) && (currentRow == null || !currentRow.isVirtualRow())) {
             return null;
         }
-        if (oakPropertyName.equals(QueryImpl.JCR_PATH)) {
+        if (oakPropertyName.equals(QueryConstants.JCR_PATH)) {
             String path = currentPath();
             String local = getLocalPath(path);
             if (local == null) {
@@ -664,17 +670,17 @@ public class SelectorImpl extends SourceImpl {
                 return null;
             }
             result = PropertyValues.newString(local);
-        } else if (oakPropertyName.equals(QueryImpl.JCR_SCORE)) {
-            result = currentRow.getValue(QueryImpl.JCR_SCORE);
-        } else if (oakPropertyName.equals(QueryImpl.REP_EXCERPT)) {
-            result = currentRow.getValue(QueryImpl.REP_EXCERPT);
-        } else if (oakPropertyName.equals(QueryImpl.OAK_SCORE_EXPLANATION)) {
-            result = currentRow.getValue(QueryImpl.OAK_SCORE_EXPLANATION);
-        } else if (oakPropertyName.equals(QueryImpl.REP_SPELLCHECK)) {
-            result = currentRow.getValue(QueryImpl.REP_SPELLCHECK);
-        } else if (oakPropertyName.equals(QueryImpl.REP_SUGGEST)) {
-            result = currentRow.getValue(QueryImpl.REP_SUGGEST);
-        } else if (oakPropertyName.startsWith(QueryImpl.REP_FACET)) {
+        } else if (oakPropertyName.equals(QueryConstants.JCR_SCORE)) {
+            result = currentRow.getValue(QueryConstants.JCR_SCORE);
+        } else if (oakPropertyName.equals(QueryConstants.REP_EXCERPT)) {
+            result = currentRow.getValue(QueryConstants.REP_EXCERPT);
+        } else if (oakPropertyName.equals(QueryConstants.OAK_SCORE_EXPLANATION)) {
+            result = currentRow.getValue(QueryConstants.OAK_SCORE_EXPLANATION);
+        } else if (oakPropertyName.equals(QueryConstants.REP_SPELLCHECK)) {
+            result = currentRow.getValue(QueryConstants.REP_SPELLCHECK);
+        } else if (oakPropertyName.equals(QueryConstants.REP_SUGGEST)) {
+            result = currentRow.getValue(QueryConstants.REP_SUGGEST);
+        } else if (oakPropertyName.startsWith(QueryConstants.REP_FACET)) {
             result = currentRow.getValue(oakPropertyName);
         } else {
             result = PropertyValues.create(t.getProperty(oakPropertyName));
@@ -804,6 +810,6 @@ public class SelectorImpl extends SourceImpl {
 
     @Override
     public SourceImpl copyOf() {
-        return new SelectorImpl(nodeType, selectorName);
+        return new SelectorImpl(nodeTypeInfo, selectorName);
     }
 }

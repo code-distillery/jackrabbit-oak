@@ -16,8 +16,10 @@
  */
 package org.apache.jackrabbit.oak.upgrade.cli.node;
 
+import com.mongodb.DB;
 import org.apache.jackrabbit.oak.plugins.document.DocumentMK;
 import org.apache.jackrabbit.oak.plugins.document.DocumentNodeStore;
+import org.apache.jackrabbit.oak.plugins.document.mongo.MongoBlobStore;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 
@@ -37,29 +39,57 @@ public class MongoFactory implements NodeStoreFactory {
 
     private final int cacheSize;
 
-    public MongoFactory(String repoDesc, int cacheSize) {
+    private final boolean readOnly;
+
+    public MongoFactory(String repoDesc, int cacheSize, boolean readOnly) {
         this.uri = new MongoClientURI(repoDesc);
         this.cacheSize = cacheSize;
+        this.readOnly = readOnly;
     }
 
     @Override
-    public NodeStore create(BlobStore blobStore, Closer closer) throws UnknownHostException {
+    public NodeStore create(BlobStore blobStore, Closer closer) throws IOException {
+        System.setProperty(DocumentNodeStore.SYS_PROP_DISABLE_JOURNAL, "true");
+        DocumentMK.Builder builder = getBuilder(cacheSize);
+        builder.setMongoDB(getDB(closer));
+        if (blobStore != null) {
+            builder.setBlobStore(blobStore);
+        }
+        if (readOnly) {
+            builder.setReadOnlyMode();
+        }
+        DocumentNodeStore documentNodeStore = builder.getNodeStore();
+
+        // TODO probably we should disable all observers, see OAK-5651
+        documentNodeStore.getBundlingConfigHandler().unregisterObserver();
+
+        closer.register(asCloseable(documentNodeStore));
+        return documentNodeStore;
+    }
+
+    private DB getDB(Closer closer) throws UnknownHostException {
         String db;
         if (uri.getDatabase() == null) {
             db = "aem-author"; // assume an author instance
         } else {
             db = uri.getDatabase();
         }
-        DocumentMK.Builder builder = getBuilder(cacheSize);
         MongoClient client = new MongoClient(uri);
         closer.register(asCloseable(client));
-        builder.setMongoDB(client.getDB(db));
-        if (blobStore != null) {
-            builder.setBlobStore(blobStore);
+        return client.getDB(db);
+    }
+
+    @Override
+    public boolean hasExternalBlobReferences() throws IOException {
+        Closer closer = Closer.create();
+        try {
+            MongoBlobStore mongoBlobStore = new MongoBlobStore(getDB(closer));
+            return !mongoBlobStore.getAllChunkIds(0).hasNext();
+        } catch(Throwable e) {
+            throw closer.rethrow(e);
+        } finally {
+            closer.close();
         }
-        DocumentNodeStore documentNodeStore = builder.getNodeStore();
-        closer.register(asCloseable(documentNodeStore));
-        return documentNodeStore;
     }
 
     static Closeable asCloseable(final DocumentNodeStore documentNodeStore) {

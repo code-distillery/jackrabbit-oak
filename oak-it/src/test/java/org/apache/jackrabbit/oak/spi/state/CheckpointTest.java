@@ -19,6 +19,10 @@
 
 package org.apache.jackrabbit.oak.spi.state;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javax.annotation.Nonnull;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -31,6 +35,8 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.fixture.NodeStoreFixture;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
+import org.apache.jackrabbit.oak.spi.commit.Observable;
+import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -81,6 +87,26 @@ public class CheckpointTest extends OakBaseTest {
                 "one", "1", "two", "2", "three", "2");
         String cp = store.checkpoint(Long.MAX_VALUE, props);
         assertEquals(props, store.checkpointInfo(cp));
+    }
+
+    @Test
+    public void noContentChangeForCheckpoints() throws Exception{
+        final AtomicInteger invocationCount = new AtomicInteger();
+        ((Observable)store).addObserver(new Observer() {
+            @Override
+            public void contentChanged(@Nonnull NodeState root, @Nonnull CommitInfo info) {
+                invocationCount.incrementAndGet();
+            }
+        });
+
+        invocationCount.set(0);
+
+        String cp = store.checkpoint(Long.MAX_VALUE);
+        assertEquals(0, invocationCount.get());
+
+        store.release(cp);
+        assertEquals(0, invocationCount.get());
+
     }
 
     @Test

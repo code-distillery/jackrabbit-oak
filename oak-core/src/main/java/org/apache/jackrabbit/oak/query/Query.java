@@ -19,13 +19,14 @@ import java.util.List;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import aQute.bnd.annotation.ProviderType;
+import org.osgi.annotation.versioning.ProviderType;
 
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
+import org.apache.jackrabbit.oak.query.stats.QueryStatsData.QueryExecutionStats;
 
 /**
  * A "select" or "union" query.
@@ -182,5 +183,31 @@ public interface Query {
      * @return true if yes
      */    
     boolean containsUnfilteredFullTextCondition();
+
+    /**
+     * Set the query option to be used for this query.
+     * 
+     * @param options the options
+     */
+    void setQueryOptions(QueryOptions options);
+
+    /**
+     * Whether the query is potentially slow.
+     * Only supported for prepared queries.
+     * 
+     * @return true if traversal is the only option
+     */
+    boolean isPotentiallySlow();
+
+    /**
+     * Verify the query is not potentially slow. Only supported for prepared
+     * queries.
+     * 
+     * @throws IllegalArgumentException if potentially slow, and configured to
+     *             fail in this case
+     */
+    void verifyNotPotentiallySlow();
+    
+    QueryExecutionStats getQueryExecutionStats();
 
 }

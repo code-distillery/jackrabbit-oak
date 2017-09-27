@@ -23,18 +23,21 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.jackrabbit.oak.commons.FixturesHelper;
+import org.apache.jackrabbit.oak.cow.COWStoreFixture;
 import org.apache.jackrabbit.oak.fixture.DocumentMemoryFixture;
 import org.apache.jackrabbit.oak.fixture.DocumentMongoFixture;
 import org.apache.jackrabbit.oak.fixture.DocumentRdbFixture;
 import org.apache.jackrabbit.oak.fixture.MemoryFixture;
 import org.apache.jackrabbit.oak.fixture.NodeStoreFixture;
-import org.apache.jackrabbit.oak.plugins.segment.fixture.SegmentFixture;
+import org.apache.jackrabbit.oak.composite.CompositeMemoryStoreFixture;
+import org.apache.jackrabbit.oak.composite.CompositeSegmentStoreFixture;
+import org.apache.jackrabbit.oak.segment.fixture.SegmentTarFixture;
 
 public class NodeStoreFixtures {
 
     public static final NodeStoreFixture MEMORY_NS = new MemoryFixture();
 
-    public static final NodeStoreFixture SEGMENT_MK = new SegmentFixture();
+    public static final NodeStoreFixture SEGMENT_TAR = new SegmentTarFixture();
 
     public static final NodeStoreFixture DOCUMENT_NS = new DocumentMongoFixture();
 
@@ -42,13 +45,16 @@ public class NodeStoreFixtures {
 
     public static final NodeStoreFixture DOCUMENT_MEM = new DocumentMemoryFixture();
 
+    public static final NodeStoreFixture COMPOSITE_SEGMENT = new CompositeSegmentStoreFixture();
+
+    public static final NodeStoreFixture COMPOSITE_MEM = new CompositeMemoryStoreFixture();
+
+    public static final NodeStoreFixture COW_DOCUMENT = new COWStoreFixture();
+
     public static Collection<Object[]> asJunitParameters(Set<FixturesHelper.Fixture> fixtures) {
         List<NodeStoreFixture> configuredFixtures = new ArrayList<NodeStoreFixture>();
         if (fixtures.contains(FixturesHelper.Fixture.DOCUMENT_NS)) {
             configuredFixtures.add(DOCUMENT_NS);
-        }
-        if (fixtures.contains(FixturesHelper.Fixture.SEGMENT_MK)) {
-            configuredFixtures.add(SEGMENT_MK);
         }
         if (fixtures.contains(FixturesHelper.Fixture.MEMORY_NS)) {
             configuredFixtures.add(MEMORY_NS);
@@ -58,6 +64,18 @@ public class NodeStoreFixtures {
         }
         if (fixtures.contains(FixturesHelper.Fixture.DOCUMENT_MEM)) {
             configuredFixtures.add(DOCUMENT_MEM);
+        }
+        if (fixtures.contains(FixturesHelper.Fixture.SEGMENT_TAR)) {
+            configuredFixtures.add(SEGMENT_TAR);
+        }
+        if (fixtures.contains(FixturesHelper.Fixture.COMPOSITE_SEGMENT)) {
+            configuredFixtures.add(COMPOSITE_SEGMENT);
+        }
+        if (fixtures.contains(FixturesHelper.Fixture.COMPOSITE_MEM)) {
+            configuredFixtures.add(COMPOSITE_MEM);
+        }
+        if (fixtures.contains(FixturesHelper.Fixture.COW_DOCUMENT)) {
+            configuredFixtures.add(COW_DOCUMENT);
         }
 
         Collection<Object[]> result = new ArrayList<Object[]>();

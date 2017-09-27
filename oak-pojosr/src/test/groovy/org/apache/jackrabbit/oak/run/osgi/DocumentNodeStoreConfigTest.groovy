@@ -39,6 +39,7 @@ import org.apache.jackrabbit.oak.spi.state.NodeStore
 import org.h2.jdbcx.JdbcDataSource
 import org.junit.After
 import org.junit.Test
+import org.osgi.framework.ServiceEvent
 import org.osgi.framework.ServiceReference
 import org.osgi.framework.ServiceRegistration
 
@@ -80,6 +81,36 @@ class DocumentNodeStoreConfigTest extends AbstractRepositoryFactoryTest {
     }
 
     @Test
+    public void testRDBDocumentStore2Datasources() throws Exception {
+        // see https://issues.apache.org/jira/browse/OAK-5098
+        registry = repositoryFactory.initializeServiceRegistry(config)
+
+        //1. Register the DataSource as a service
+        DataSource ds = createDS("jdbc:h2:mem:testRDB;DB_CLOSE_DELAY=-1")
+        ServiceRegistration fds = registry.registerService(DataSource.class.name, ds, ['datasource.name': 'oak'] as Hashtable)
+
+        //2. Register another DataSource as a service with the same name
+        DataSource ds2 = createDS("jdbc:h2:mem:testRDB;DB_CLOSE_DELAY=-1")
+        registry.registerService(DataSource.class.name, ds2, ['datasource.name': 'oak'] as Hashtable)
+
+        //3. Create config for DocumentNodeStore with RDB enabled
+        createConfig([
+                'org.apache.jackrabbit.oak.plugins.document.DocumentNodeStoreService': [
+                        documentStoreType: 'RDB'
+                ]
+        ])
+
+        DocumentNodeStore ns = getServiceWithWait(NodeStore.class)
+
+        //4. unregister first DS
+        fds.unregister()
+
+        //5. check that nodestore is gone
+        TimeUnit.MILLISECONDS.sleep(500)
+        assertNoService(NodeStore.class)
+    }
+
+    @Test
     public void testRDBDocumentStoreRestart() throws Exception {
         registry = repositoryFactory.initializeServiceRegistry(config)
 
@@ -97,9 +128,18 @@ class DocumentNodeStoreConfigTest extends AbstractRepositoryFactoryTest {
         DocumentNodeStore ns = getServiceWithWait(NodeStore.class)
 
         //3. Shut down ds
-        srds.unregister();
-        TimeUnit.MILLISECONDS.sleep(500);
-        assertNoService(NodeStore.class)
+        // Wait for service to be unregistered after at most 5s.
+        // Previously, we waited only 500ms; this was extended due to
+        // occasional test failures on Jenkins (see OAK-5612). If 5s
+        // are not sufficient, we should investigate some more.
+        awaitServiceEvent({
+                    srds.unregister();
+                },
+                classNameFilter(NodeStore.class.name),
+                ServiceEvent.UNREGISTERING,
+                5, TimeUnit.SECONDS
+        )
+        assert registry.getServiceReference(NodeStore.class.name) == null
 
         //4. Restart ds, service should still be down
         srds = registry.registerService(DataSource.class.name, ds, ['datasource.name': 'oak'] as Hashtable)
@@ -260,8 +300,48 @@ class DocumentNodeStoreConfigTest extends AbstractRepositoryFactoryTest {
         assert getService(BlobStoreStatsMBean.class) : "BlobStoreStatsMBean should " +
                 "be registered by DocumentNodeStoreService in default blobStore used"
 
+        assert getService(BlobStore.class) : "BlobStore service should be exposed for default setup"
         testBlobStoreStats(ns)
         testDocumentStoreStats(ns)
+    }
+
+    @Test
+    public void testBundlingEnabledByDefault() throws Exception {
+        registry = repositoryFactory.initializeServiceRegistry(config)
+
+        //1. Register the DataSource as a service
+        DataSource ds = createDS("jdbc:h2:mem:testRDB;DB_CLOSE_DELAY=-1")
+        registry.registerService(DataSource.class.name, ds, ['datasource.name': 'oak'] as Hashtable)
+
+        //2. Create config for DocumentNodeStore with RDB enabled
+        createConfig([
+                'org.apache.jackrabbit.oak.plugins.document.DocumentNodeStoreService': [
+                        documentStoreType: 'RDB'
+                ]
+        ])
+
+        DocumentNodeStore ns = getServiceWithWait(NodeStore.class)
+        assert ns.bundlingConfigHandler.enabled
+    }
+
+    @Test
+    public void testBundlingDisabled() throws Exception {
+        registry = repositoryFactory.initializeServiceRegistry(config)
+
+        //1. Register the DataSource as a service
+        DataSource ds = createDS("jdbc:h2:mem:testRDB;DB_CLOSE_DELAY=-1")
+        registry.registerService(DataSource.class.name, ds, ['datasource.name': 'oak'] as Hashtable)
+
+        //2. Create config for DocumentNodeStore with RDB enabled
+        createConfig([
+                'org.apache.jackrabbit.oak.plugins.document.DocumentNodeStoreService': [
+                        documentStoreType: 'RDB',
+                        bundlingDisabled : true
+                ]
+        ])
+
+        DocumentNodeStore ns = getServiceWithWait(NodeStore.class)
+        assert !ns.bundlingConfigHandler.enabled
     }
 
     private void testDocumentStoreStats(DocumentNodeStore store) {

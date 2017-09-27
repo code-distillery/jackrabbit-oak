@@ -17,14 +17,17 @@
 package org.apache.jackrabbit.oak;
 
 import java.io.Closeable;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nonnull;
 import javax.jcr.NoSuchWorkspaceException;
 
+import com.google.common.collect.Lists;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -35,18 +38,27 @@ import org.apache.jackrabbit.oak.plugins.index.AsyncIndexUpdate;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceEditorProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
+import org.apache.jackrabbit.oak.spi.commit.CommitContext;
+import org.apache.jackrabbit.oak.spi.commit.CommitHook;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.whiteboard.DefaultWhiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
-import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardIndexEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.WhiteboardIndexEditorProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
 import org.junit.Test;
 
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -151,7 +163,7 @@ public class OakTest {
         Oak oak = new Oak()
                 .with(new OpenSecurityProvider())
                 .with(wb)
-                .withAsyncIndexing("foo", 5);
+                .withAsyncIndexing("foo-async", 5);
         ContentRepository repo = oak.createContentRepository();
 
         ((Closeable)repo).close();
@@ -189,6 +201,34 @@ public class OakTest {
         root.commit();
         cs.close();
         ((Closeable)repo).close();
+    }
+
+    @Test
+    public void commitContextInCommitInfo() throws Exception{
+        CommitInfoCapturingStore store = new CommitInfoCapturingStore();
+        Oak oak = new Oak(store);
+
+        ContentRepository repo = oak.with(new OpenSecurityProvider()).createContentRepository();
+        assertThat(store.infos, is(not(empty())));
+        for (CommitInfo ci : store.infos){
+            assertNotNull(ci.getInfo().get(CommitContext.NAME));
+        }
+        ((Closeable)repo).close();
+    }
+
+    private static class CommitInfoCapturingStore extends MemoryNodeStore {
+        List<CommitInfo> infos = Lists.newArrayList();
+
+        @Override
+        public synchronized NodeState merge(@Nonnull NodeBuilder builder, @Nonnull CommitHook commitHook,
+                                            @Nonnull CommitInfo info) throws CommitFailedException {
+            if (info.getSessionId().equals(OakInitializer.SESSION_ID)) {
+                this.infos.add(info);
+            }
+            return super.merge(builder, commitHook, info);
+        }
+
+
     }
 
 }

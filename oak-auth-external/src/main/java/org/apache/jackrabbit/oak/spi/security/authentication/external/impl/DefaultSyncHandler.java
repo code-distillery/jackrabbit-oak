@@ -18,7 +18,6 @@ package org.apache.jackrabbit.oak.spi.security.authentication.external.impl;
 
 import java.util.Iterator;
 import java.util.Map;
-
 import javax.annotation.Nonnull;
 import javax.jcr.RepositoryException;
 import javax.jcr.ValueFactory;
@@ -103,7 +102,11 @@ public class DefaultSyncHandler implements SyncHandler {
     @Override
     public SyncContext createContext(@Nonnull ExternalIdentityProvider idp, @Nonnull UserManager userManager,
                                      @Nonnull ValueFactory valueFactory) throws SyncException {
-        return new DefaultSyncContext(config, idp, userManager, valueFactory);
+        if (config.user().getDynamicMembership()) {
+            return new DynamicSyncContext(config, idp, userManager, valueFactory);
+        } else {
+            return new DefaultSyncContext(config, idp, userManager, valueFactory);
+        }
     }
 
     /**
@@ -136,7 +139,7 @@ public class DefaultSyncHandler implements SyncHandler {
     @Nonnull
     @Override
     public Iterator<SyncedIdentity> listIdentities(@Nonnull UserManager userManager) throws RepositoryException {
-        final Iterator<Authorizable> iter = userManager.findAuthorizables("jcr:primaryType", null);
+        final Iterator<Authorizable> iter = userManager.findAuthorizables(DefaultSyncContext.REP_EXTERNAL_ID, null);
         return new AbstractLazyIterator<SyncedIdentity>() {
 
             @Override
@@ -144,7 +147,7 @@ public class DefaultSyncHandler implements SyncHandler {
                 while (iter.hasNext()) {
                     try {
                         SyncedIdentity id = DefaultSyncContext.createSyncedIdentity(iter.next());
-                        if (id != null) {
+                        if (id != null && id.getExternalIdRef() != null) {
                             return id;
                         }
                     } catch (RepositoryException e) {

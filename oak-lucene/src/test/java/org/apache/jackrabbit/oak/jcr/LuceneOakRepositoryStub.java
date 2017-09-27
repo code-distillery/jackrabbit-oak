@@ -33,17 +33,17 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.jcr.RepositoryException;
 
-import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.aggregate.SimpleNodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneInitializerHelper;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
+import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 
-public class LuceneOakRepositoryStub extends OakTarMKRepositoryStub {
+public class LuceneOakRepositoryStub extends OakSegmentTarRepositoryStub {
 
     public LuceneOakRepositoryStub(Properties settings)
             throws RepositoryException {
@@ -61,7 +61,7 @@ public class LuceneOakRepositoryStub extends OakTarMKRepositoryStub {
                 .with(new LuceneIndexEditorProvider());
     }
 
-    private static NodeAggregator getNodeAggregator() {
+    private static QueryIndex.NodeAggregator getNodeAggregator() {
         return new SimpleNodeAggregator()
             .newRuleWithName(NT_FILE, newArrayList(JCR_CONTENT, JCR_CONTENT + "/*"));
     }
@@ -100,6 +100,14 @@ public class LuceneOakRepositoryStub extends OakTarMKRepositoryStub {
                 NodeBuilder props = ntBase.child(LuceneIndexConstants.PROP_NODE);
                 props.setProperty(JCR_PRIMARYTYPE, "nt:unstructured", NAME);
 
+                // Enable function-based indexes: upper+lower(name+localname+prop1)
+                functionBasedIndex(props, "upper(name())");
+                functionBasedIndex(props, "lower(name())");
+                functionBasedIndex(props, "upper(localname())");
+                functionBasedIndex(props, "lower(localname())");
+                functionBasedIndex(props, "upper([prop1])");
+                functionBasedIndex(props, "lower([prop1])");
+
                 enableFulltextIndex(props.child("allProps"));
             }
         }
@@ -115,5 +123,12 @@ public class LuceneOakRepositoryStub extends OakTarMKRepositoryStub {
                     .setProperty(LuceneIndexConstants.PROP_NAME, LuceneIndexConstants.REGEX_ALL_PROPS)
                     .setProperty(LuceneIndexConstants.PROP_IS_REGEX, true);
         }
+        
+        private static void functionBasedIndex(NodeBuilder props, String function) {
+            props.child(function).
+                setProperty(JCR_PRIMARYTYPE, "nt:unstructured", NAME).
+                setProperty(LuceneIndexConstants.PROP_FUNCTION, function);
+        }
+
     }
 }

@@ -16,8 +16,6 @@
  */
 package org.apache.jackrabbit.oak.jcr.xml;
 
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -34,7 +32,6 @@ import javax.jcr.ItemExistsException;
 import javax.jcr.PathNotFoundException;
 import javax.jcr.PropertyType;
 import javax.jcr.RepositoryException;
-import javax.jcr.Value;
 import javax.jcr.lock.LockException;
 import javax.jcr.nodetype.ConstraintViolationException;
 import javax.jcr.nodetype.NodeDefinition;
@@ -59,8 +56,10 @@ import org.apache.jackrabbit.oak.jcr.session.SessionContext;
 import org.apache.jackrabbit.oak.jcr.session.WorkspaceImpl;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
-import org.apache.jackrabbit.oak.plugins.nodetype.DefinitionProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.EffectiveNodeTypeProvider;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
+import org.apache.jackrabbit.oak.spi.nodetype.DefinitionProvider;
+import org.apache.jackrabbit.oak.spi.nodetype.EffectiveNodeType;
+import org.apache.jackrabbit.oak.spi.nodetype.EffectiveNodeTypeProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.Permissions;
 import org.apache.jackrabbit.oak.spi.xml.Importer;
 import org.apache.jackrabbit.oak.spi.xml.NodeInfo;
@@ -69,9 +68,10 @@ import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedNodeImporter;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedPropertyImporter;
 import org.apache.jackrabbit.oak.spi.xml.ReferenceChangeTracker;
-import org.apache.jackrabbit.oak.util.TreeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
 
 public class ImporterImpl implements Importer {
     private static final Logger log = LoggerFactory.getLogger(ImporterImpl.class);
@@ -189,19 +189,11 @@ public class ImporterImpl implements Importer {
     }
 
     private void createProperty(Tree tree, PropInfo pInfo, PropertyDefinition def) throws RepositoryException {
-        List<Value> values = pInfo.getValues(pInfo.getTargetType(def));
-        PropertyState propertyState;
-        String name = pInfo.getName();
+        tree.setProperty(pInfo.asPropertyState(def));
         int type = pInfo.getType();
-        if (values.size() == 1 && !def.isMultiple()) {
-            propertyState = PropertyStates.createProperty(name, values.get(0));
-        } else {
-            propertyState = PropertyStates.createProperty(name, values);
-        }
-        tree.setProperty(propertyState);
         if (type == PropertyType.REFERENCE || type == PropertyType.WEAKREFERENCE) {
             // store reference for later resolution
-            refTracker.processedReference(new Reference(tree, name));
+            refTracker.processedReference(new Reference(tree, pInfo.getName()));
         }
     }
 
@@ -277,7 +269,8 @@ public class ImporterImpl implements Importer {
         for (PropInfo pi : propInfos) {
             // find applicable definition
             //TODO find better heuristics?
-            PropertyDefinition def = pi.getPropertyDef(effectiveNodeTypeProvider.getEffectiveNodeType(tree));
+            EffectiveNodeType ent = effectiveNodeTypeProvider.getEffectiveNodeType(tree);
+            PropertyDefinition def = ent.getPropertyDefinition(pi.getName(), pi.getType(), pi.isUnknownMultiple());
             if (def.isProtected()) {
                 // skip protected property
                 log.debug("Protected property {}", pi.getName());

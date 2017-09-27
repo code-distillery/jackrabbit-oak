@@ -31,6 +31,7 @@ import javax.security.auth.login.LoginException;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
 import org.apache.jackrabbit.oak.api.AuthInfo;
 import org.apache.jackrabbit.oak.api.ContentSession;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalGroup;
@@ -52,8 +53,6 @@ import static org.junit.Assert.fail;
  */
 public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
 
-    private final IDP idp = new IDP();
-
     private static void assertAttributes(@Nonnull Map<String, ?> expected, @Nonnull AuthInfo info) {
         assertEquals(expected.size(), info.getAttributeNames().length);
         for (String aName : info.getAttributeNames()) {
@@ -69,7 +68,7 @@ public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
         try {
             AuthInfo info = cs.getAuthInfo();
             assertEquals("testUser", info.getUserID());
-            assertAttributes(idp.getAttributes(creds), info);
+            assertAttributes(getCredentialsSupport().getAttributes(creds), info);
         } finally {
             cs.close();
         }
@@ -93,12 +92,15 @@ public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
 
     @Override
     protected ExternalIdentityProvider createIDP() {
-        return idp;
+        return new IDP();
     }
 
-    @Override
-    protected void destroyIDP(ExternalIdentityProvider idp) {
-        // ignore
+    static Credentials createTestCredentials() {
+        return new TestCredentials(USER_ID);
+    }
+
+    protected CredentialsSupport getCredentialsSupport() {
+        return (IDP) idp;
     }
 
     private static final class TestCredentials implements Credentials {
@@ -110,7 +112,10 @@ public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
         }
     }
 
-    private static final class IDP implements ExternalIdentityProvider, CredentialsSupport {
+    static final class IDP implements ExternalIdentityProvider, CredentialsSupport {
+
+        private final Map attributes = Maps.newHashMap(ImmutableMap.of("a", "a"));
+
         @Nonnull
         @Override
         public String getName() {
@@ -138,7 +143,7 @@ public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
                     @Nonnull
                     @Override
                     public ExternalIdentityRef getExternalId() {
-                        return new ExternalIdentityRef(uid, "test");
+                        return new ExternalIdentityRef(uid, getName());
                     }
 
                     @Nonnull
@@ -214,9 +219,19 @@ public class CustomCredentialsSupportTest extends ExternalLoginModuleTestBase {
         @Override
         public Map<String, ?> getAttributes(@Nonnull Credentials credentials) {
             if (credentials instanceof TestCredentials) {
-                return ImmutableMap.of("a", "a");
+                return attributes;
             } else {
                 return ImmutableMap.of();
+            }
+        }
+
+        @Override
+        public boolean setAttributes(@Nonnull Credentials credentials, @Nonnull Map<String, ?> attributes) {
+            if (credentials instanceof TestCredentials) {
+                this.attributes.putAll(attributes);
+                return true;
+            } else {
+                return false;
             }
         }
     }

@@ -38,12 +38,12 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import static org.apache.jackrabbit.JcrConstants.JCR_CONTENT;
-import static org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.junit.Assert.assertEquals;
 
 public class NodeStoreBinaryResourceProviderTest {
     @Rule
-    public final TemporaryFolder temporaryFolder = new TemporaryFolder();
+    public final TemporaryFolder temporaryFolder = new TemporaryFolder(new File("target"));
 
     private NodeState root = INITIAL_CONTENT;
 
@@ -86,6 +86,7 @@ public class NodeStoreBinaryResourceProviderTest {
         CSVFileBinaryResourceProvider csvbrp = new CSVFileBinaryResourceProvider(csv, blobStore);
         assertEquals(2, csvbrp.getBinaries("/").size());
 
+        csvbrp.close();
     }
 
     private NodeBuilder createFileNode(NodeBuilder base, String name, Blob content, String mimeType) {

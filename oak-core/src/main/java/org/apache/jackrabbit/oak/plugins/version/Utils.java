@@ -29,11 +29,12 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 /**
  * {@code Utils} provide some utility methods.
  */
-public final class Utils {
+final class Utils {
     private Utils() {
     }
 
@@ -47,6 +48,11 @@ public final class Utils {
     @Nonnull
     static String uuidFromNode(@Nonnull NodeBuilder node)
             throws IllegalArgumentException {
+        return uuidFromNode(node.getNodeState());
+    }
+
+    @Nonnull
+    static String uuidFromNode(@Nonnull NodeState node) {
         PropertyState p = checkNotNull(node).getProperty(JCR_UUID);
         if (p == null) {
             throw new IllegalArgumentException("Not referenceable");

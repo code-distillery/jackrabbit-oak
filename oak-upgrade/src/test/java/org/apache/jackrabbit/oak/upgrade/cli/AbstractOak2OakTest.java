@@ -16,26 +16,49 @@
  */
 package org.apache.jackrabbit.oak.upgrade.cli;
 
+import static java.util.Collections.singletonMap;
+import static junit.framework.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
 
+import javax.annotation.Nullable;
 import javax.jcr.Node;
 import javax.jcr.Property;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.SimpleCredentials;
+import javax.jcr.Value;
 
+import com.google.common.base.Function;
+import com.google.common.collect.Lists;
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.jackrabbit.oak.api.Blob;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
+import org.apache.jackrabbit.oak.commons.IOUtils;
 import org.apache.jackrabbit.oak.jcr.Jcr;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
+import org.apache.jackrabbit.oak.plugins.document.DocumentNodeState;
 import org.apache.jackrabbit.oak.plugins.index.reference.ReferenceIndexProvider;
+import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeState;
+import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
+import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
+import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.upgrade.RepositorySidegrade;
 import org.apache.jackrabbit.oak.upgrade.cli.container.NodeStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.SegmentNodeStoreContainer;
+import org.apache.jackrabbit.oak.upgrade.cli.parser.CliArgumentException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -53,7 +76,7 @@ public abstract class AbstractOak2OakTest {
 
     private NodeStore destination;
 
-    private Session session;
+    protected Session session;
 
     private RepositoryImpl repository;
 
@@ -84,7 +107,10 @@ public abstract class AbstractOak2OakTest {
         String[] args = getArgs();
         log.info("oak2oak {}", Joiner.on(' ').join(args));
         OakUpgrade.main(args);
+        createSession();
+    }
 
+    protected void createSession() throws RepositoryException, IOException {
         destination = getDestinationContainer().open();
         repository = (RepositoryImpl) new Jcr(destination).with("oak.sling").with(new ReferenceIndexProvider()).createRepository();
         session = repository.login(new SimpleCredentials("admin", "admin".toCharArray()));
@@ -92,13 +118,21 @@ public abstract class AbstractOak2OakTest {
 
     @After
     public void clean() throws IOException {
-        session.logout();
-        repository.shutdown();
-        getDestinationContainer().close();
-        getDestinationContainer().clean();
+        try {
+            if (session != null) {
+                session.logout();
+            }
+            if (repository != null) {
+                repository.shutdown();
+            }
+        } finally {
+            IOUtils.closeQuietly(getDestinationContainer());
+            getDestinationContainer().clean();
+            getSourceContainer().clean();
+        }
     }
 
-    private void initContent(NodeStore target) throws IOException, RepositoryException {
+    protected void initContent(NodeStore target) throws IOException, RepositoryException, CommitFailedException {
         NodeStore initialContent = testContent.open();
         try {
             RepositorySidegrade sidegrade = new RepositorySidegrade(initialContent, target);
@@ -106,15 +140,38 @@ public abstract class AbstractOak2OakTest {
         } finally {
             testContent.close();
         }
+
+        NodeBuilder builder = target.getRoot().builder();
+        builder.setProperty("binary-prop", getRandomBlob(target));
+        builder.setProperty("checkpoint-state", "before");
+        target.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+        target.checkpoint(60000, singletonMap("key", "123"));
+
+        builder.setProperty("checkpoint-state", "after");
+        builder.setProperty("binary-prop", getRandomBlob(target));
+        builder.child(":async").setProperty("test", "123");
+        target.merge(builder, EmptyHook.INSTANCE, CommitInfo.EMPTY);
+    }
+
+    private Blob getRandomBlob(NodeStore target) throws IOException {
+        Random r = new Random();
+        byte[] buff = new byte[512 * 1024];
+        r.nextBytes(buff);
+        return target.createBlob(new ByteArrayInputStream(buff));
     }
 
     @Test
-    public void validateMigration() throws RepositoryException, IOException {
+    public void validateMigration() throws RepositoryException, IOException, CliArgumentException {
         verifyContent(session);
         verifyBlob(session);
+        if (supportsCheckpointMigration()) {
+            verifyCheckpoint();
+        } else {
+            verifyEmptyAsync();
+        }
     }
 
-    static void verifyContent(Session session) throws RepositoryException {
+    public static void verifyContent(Session session) throws RepositoryException {
         Node root = session.getRootNode();
         assertEquals("rep:root", root.getPrimaryNodeType().getName());
         assertEquals(1, root.getMixinNodeTypes().length);
@@ -127,11 +184,24 @@ public abstract class AbstractOak2OakTest {
 
         Node nodeType = session.getNode("/jcr:system/jcr:nodeTypes/sling:OrderedFolder");
         assertEquals("rep:NodeType", nodeType.getProperty("jcr:primaryType").getString());
-        assertEquals("jcr:mixinTypes", nodeType.getProperty("rep:protectedProperties").getValues()[0].getString());
+
+        List<String> values = Lists.transform(Arrays.asList(nodeType.getProperty("rep:protectedProperties").getValues()), new Function<Value, String>() {
+            @Nullable
+            @Override
+            public String apply(@Nullable Value input) {
+                try {
+                    return input.getString();
+                } catch (RepositoryException e) {
+                    return null;
+                }
+            }
+        });
+        assertTrue(values.contains("jcr:mixinTypes"));
+        assertTrue(values.contains("jcr:primaryType"));
         assertEquals("false", nodeType.getProperty("jcr:isAbstract").getString());
     }
 
-    static void verifyBlob(Session session) throws IOException, RepositoryException {
+    public static void verifyBlob(Session session) throws IOException, RepositoryException {
         Property p = session.getProperty("/sling-logo.png/jcr:content/jcr:data");
         InputStream is = p.getValue().getBinary().getStream();
         String expectedMD5 = "35504d8c59455ab12a31f3d06f139a05";
@@ -142,4 +212,59 @@ public abstract class AbstractOak2OakTest {
         }
     }
 
+    protected void verifyCheckpoint() {
+        assertEquals("after", destination.getRoot().getString("checkpoint-state"));
+
+        String checkpointReference = null;
+
+        for (String c : destination.checkpoints()) {
+            if (destination.checkpointInfo(c).containsKey("key")) {
+                checkpointReference = c;
+                break;
+            }
+        }
+
+        assertNotNull(checkpointReference);
+
+        Map<String, String> info = destination.checkpointInfo(checkpointReference);
+        assertEquals("123", info.get("key"));
+
+        NodeState checkpoint = destination.retrieve(checkpointReference);
+        assertEquals("before", checkpoint.getString("checkpoint-state"));
+
+        assertEquals("123", destination.getRoot().getChildNode(":async").getString("test"));
+
+        for (String name : new String[] {"var", "etc", "sling.css", "apps", "libs", "sightly"}) {
+            assertSameRecord(destination.getRoot().getChildNode(name), checkpoint.getChildNode(name));
+        }
+    }
+
+    private static void assertSameRecord(NodeState ns1, NodeState ns2) {
+        String recordId1 = getRecordId(ns1);
+        String recordId2 = getRecordId(ns2);
+        assertNotNull(recordId1);
+        assertEquals(recordId1, recordId2);
+    }
+
+    private static String getRecordId(NodeState node) {
+        if (node instanceof SegmentNodeState) {
+            return ((SegmentNodeState) node).getRecordId().toString();
+        } else if (node instanceof org.apache.jackrabbit.oak.segment.SegmentNodeState) {
+            return ((org.apache.jackrabbit.oak.segment.SegmentNodeState) node).getRecordId().toString();
+        } else if (node instanceof DocumentNodeState) {
+            return ((DocumentNodeState) node).getLastRevision().toString();
+        } else {
+            return null;
+        }
+    }
+
+    // OAK-2869
+    protected void verifyEmptyAsync() {
+        NodeState state = destination.getRoot().getChildNode(":async");
+        assertFalse(state.hasProperty("test"));
+    }
+
+    protected boolean supportsCheckpointMigration() {
+        return false;
+    }
 }

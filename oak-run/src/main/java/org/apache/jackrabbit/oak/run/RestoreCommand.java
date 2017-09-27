@@ -19,13 +19,26 @@ package org.apache.jackrabbit.oak.run;
 
 import java.io.File;
 
-import org.apache.jackrabbit.oak.plugins.backup.FileStoreRestore;
+import joptsimple.OptionParser;
+import joptsimple.OptionSet;
+import org.apache.jackrabbit.oak.run.commons.Command;
 
 class RestoreCommand implements Command {
 
     @Override
     public void execute(String... args) throws Exception {
-        FileStoreRestore.restore(new File(args[1]), new File(args[0]));
+        OptionParser parser = new OptionParser();
+        OptionSet options = parser.parse(args);
+
+        if (options.nonOptionArguments().size() < 2) {
+            System.err.println("This command requires a target and a source folder");
+            System.exit(1);
+        }
+
+        File target = new File(options.nonOptionArguments().get(0).toString());
+        File source = new File(options.nonOptionArguments().get(1).toString());
+
+        SegmentTarUtils.restore(source, target);
     }
 
 }

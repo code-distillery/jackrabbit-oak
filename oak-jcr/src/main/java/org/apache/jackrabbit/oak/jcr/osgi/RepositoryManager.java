@@ -36,16 +36,18 @@ import org.apache.jackrabbit.oak.commons.PropertiesUtil;
 import org.apache.jackrabbit.oak.osgi.OsgiWhiteboard;
 import org.apache.jackrabbit.oak.plugins.commit.JcrConflictHandler;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
-import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.InitialContent;
 import org.apache.jackrabbit.oak.plugins.observation.CommitRateLimiter;
+import org.apache.jackrabbit.oak.plugins.version.VersionHook;
+import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.spi.whiteboard.Tracker;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
-import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardEditorProvider;
-import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardIndexEditorProvider;
-import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardIndexProvider;
+import org.apache.jackrabbit.oak.spi.commit.WhiteboardEditorProvider;
+import org.apache.jackrabbit.oak.plugins.index.WhiteboardIndexEditorProvider;
+import org.apache.jackrabbit.oak.spi.query.WhiteboardIndexProvider;
 import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
@@ -63,7 +65,7 @@ import org.osgi.framework.ServiceRegistration;
         )
 })
 public class RepositoryManager {
-    private static final int DEFAULT_OBSERVATION_QUEUE_LENGTH = 1000;
+    private static final int DEFAULT_OBSERVATION_QUEUE_LENGTH = BackgroundObserver.DEFAULT_QUEUE_SIZE;
     private static final boolean DEFAULT_COMMIT_RATE_LIMIT = false;
     private static final boolean DEFAULT_FAST_QUERY_RESULT_SIZE = false;
 
@@ -177,6 +179,7 @@ public class RepositoryManager {
     private ServiceRegistration registerRepository(BundleContext bundleContext) {
         Oak oak = new Oak(store)
                 .with(new InitialContent())
+                .with(new VersionHook())
                 .with(JcrConflictHandler.createJcrConflictHandler())
                 .with(whiteboard)
                 .with(securityProvider)

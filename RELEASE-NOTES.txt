@@ -1,4 +1,4 @@
-Release Notes -- Apache Jackrabbit Oak -- Version 1.5.1
+Release Notes -- Apache Jackrabbit Oak -- Version 1.7.8
 
 Introduction
 ------------
@@ -7,58 +7,117 @@ Jackrabbit Oak is a scalable, high-performance hierarchical content
 repository designed for use as the foundation of modern world-class
 web sites and other demanding content applications.
 
-Apache Jackrabbit Oak 1.5.1 is an unstable release cut directly from
+Apache Jackrabbit Oak 1.7.8 is an unstable release cut directly from
 Jackrabbit Oak trunk, with a focus on new features and other
-improvements. For production use we recommend the latest stable 1.4.x
+improvements. For production use we recommend the latest stable 1.6.x
 release.
 
 The Oak effort is a part of the Apache Jackrabbit project.
 Apache Jackrabbit is a project of the Apache Software Foundation.
 
-Changes in Oak 1.5.1
+Changes in Oak 1.7.8
 ---------------------
 
 Technical task
 
-    [OAK-4156] - RDBConnectionHandler: add logging when getting the
-    connection takes long
+    [OAK-6649] - Provide callback support for newly inserted entries
+    in unique index
+    [OAK-6652] - RDB*Store: update postgresql JDBC driver reference to
+    42.1.4
+    [OAK-6660] - RDB*Store: update mysql JDBC driver reference to
+    5.1.44 (2017-08-30)
+    [OAK-6669] - Blob serializer to serialize BlobStoreBlob
+    [OAK-6671] - Enable support for custom types in ExternalSort
+    [OAK-6679] - Remove dependency on SimpleCommitContext
+    [OAK-6686] - Move OakVersion to oak-commons
+    [OAK-6696] - RDB*Store: update Tomcat JDBC pool dependency to
+    7.0.81
+    [OAK-6697] - Use OakVersion in oak-commons
+    [OAK-6705] - Replace usage of RootFactory and TreeFactory in
+    spi.security test
+    [OAK-6706] - Replaces usage of NamePathMapper implementations in
+    AbstractAccessControlListTest
+    [OAK-6712] - Move ChangeSet/Builder to oak-core-spi
 
 Bug
 
-    [OAK-4135] - Test failure:
-    org.apache.jackrabbit.j2ee.TomcatIT.testTomcat
-    [OAK-4148] - RAT plugin complains about derby files
-    [OAK-4155] - oaj.oak.spi.security.authentication.credentials not
-    exported
+    [OAK-5656] - InitialContent depends on
+    document.bundlor.BundlingConfigInitializer
+    [OAK-6193] - IllegalStateException when closing the FileStore
+    during garbage collection
+    [OAK-6259] - Test failure: VersionGCTest.gcMonitorInfoMessages
+    [OAK-6562] - OakDirectory should recreate file node upon create
+    [OAK-6635] - IndexReader closed exception in DocumentQueue
+    [OAK-6641] - test failure in
+    org.apache.jackrabbit.oak.segment.standby.ExternalPrivateStoreIT
+    [OAK-6648] - test failure seen in
+    org.apache.jackrabbit.oak.segment.upgrade.UpgradeIT
+    [OAK-6653] - Standby server must always send the persisted head to
+    clients
+    [OAK-6656] - OrderedPropertyIndexEditorProvider does not return
+    Editor to IndexUpdate leading to "ordered" being marked as missing
+    type
+    [OAK-6659] - Cold standby should fail loudly when a big blob can't
+    be timely transferred
+    [OAK-6685] - Background operation may fail when document is
+    malformed
+    [OAK-6691] - RepeatedRepositorySidegradeTest flushes an already
+    closed FileStore
+    [OAK-6704] - Set default merge polity to tiered as
+    CommitMitigatingTieredMergePolicy seems to be bad for performance
 
 Improvement
 
-    [OAK-2392] - [DocumentMK] Garbage Collect older revisions of
-    binary properties in main document
-    [OAK-4095] - Include timestamp in journal log entries
-    [OAK-4108] - Reduce logging from JournalGarbageCollector
-    [OAK-4130] - Simplify IdentifierManager.getReferences
-    [OAK-4136] - release profile in maven
-    [OAK-4152] - Expose the index path to IndexEditor
-    [OAK-4159] - Expose an option in Oak class to enable failing of
-    commit upon missing index editor provider
-    [OAK-4160] - Expose type property for ReferenceEditorProvider
-    [OAK-4163] - LastRevRecoveryAgent: improve startup diagnostics
-    [OAK-4164] - Expose path stats for Lucene index
-
-New Feature
-
-    [OAK-4144] - Expose PropertyIndex stats
+    [OAK-6123] - Filter documents not matching path restriction in
+    LucenePropertyIndex even when evaluatePathRestriction isn't set
+    [OAK-6638] - Add a composite-prepare command in oak-run
+    [OAK-6644] - Use ReadOnlyNodeBuilder for the read-only mounts
+    [OAK-6647] - Reduce reads by RevisionGC
+    [OAK-6654] - Remove duplicate code in OakRepositoryStub classes
+    [OAK-6661] - ResponseDecoder should check that the length of the
+    received blob matches the length of the sent blob
+    [OAK-6662] - Extend CredentialsSupport pluggability
+    [OAK-6663] - Revisit MountInfoProvider usage in
+    AuthorizationConfigurationImpl
+    [OAK-6664] - Revisit MountInfoProvider usage in CugConfiguration
+    [OAK-6667] - Refactor StandbyDiff for better clarity and
+    understandability
+    [OAK-6681] - Remove PropInfo dependency on EffectiveNodeType
+    [OAK-6683] - Use less resource intensive method to determine
+    number of docs in lucene index
+    [OAK-6684] - IndexPathService should work with Oak 1.0 setups
+    [OAK-6690] - Refactor constants classes NodeTypeConstants,
+    NamespaceConstants, VersionConstants
+    [OAK-6692] - Log exception in case of import via JMX operation
+    fails
+    [OAK-6693] - Ensure that IndexNodeManager releases lock in case of
+    error in acquiring it
+    [OAK-6694] - Expose TokenConstants.java
+    [OAK-6695] - Expose an abstract Credentials class
+    [OAK-6703] - Refactor oak.namepath package
+    [OAK-6708] - Move plugins.value.jcr package to oak-store-spi
 
 Task
 
-    [OAK-4076] - Benchmark to measure affect of number of indexes on
-    uuid lookup performance
-    [OAK-4132] - JaasConfigSpiTest fails intermittently with missing
-    LoginModule exception
+    [OAK-6544] - Enable active blob deletion feature by default
+    [OAK-6582] - Review MBean interactions in a composite setup
+    [OAK-6616] - Update Oak trunk to Jackrabbit 2.15.6
+    [OAK-6655] - Update travis build configuration
+    [OAK-6657] - Remove travis webhook configuration
+    [OAK-6670] - Move FSBlobSerializer to oak-blob-plugins module
+    [OAK-6673] - Improve cold standby logging
+    [OAK-6675] - Implement CompositeNodeStoreStatsMBean
+    [OAK-6698] - Refactor UUID utilites from IdentifierManager to new
+    UUIDUtils in oak-commons
+
+Test
+
+    [OAK-6639] -
+    ObservationQueueFullWarnTest.testQueueFullThenFlushing fails
+    sometimes
 
 In addition to the above-mentioned changes, this release contains
-all changes included up to the Apache Jackrabbit Oak 1.4.x release.
+all changes included up to the Apache Jackrabbit Oak 1.7.x release.
 
 For more detailed information about all the changes in this and other
 Oak releases, please see the Oak issue tracker at

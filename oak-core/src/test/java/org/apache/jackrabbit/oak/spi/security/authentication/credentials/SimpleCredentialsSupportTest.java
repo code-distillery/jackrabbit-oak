@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableMap;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
@@ -69,6 +70,32 @@ public class SimpleCredentialsSupportTest {
         assertNotNull(attributes);
         assertEquals(3, attributes.size());
         assertEquals(expected, attributes);
+    }
+
+    @Test
+    public void testSetAttributes() {
+        Map<String, ?> attributes = credentialsSupport.getAttributes(new TestCredentials());
+        assertNotNull(attributes);
+        assertTrue(attributes.isEmpty());
+
+        SimpleCredentials sc = new SimpleCredentials("uid", new char[0]);
+
+        Map<String, ?> expected = ImmutableMap.of("a", "a", "b", Boolean.TRUE, "c", new TestCredentials());
+        credentialsSupport.setAttributes(sc, expected);
+
+        for (Map.Entry<String, ?> entry : expected.entrySet()) {
+            assertEquals(entry.getValue(), sc.getAttribute(entry.getKey()));
+        }
+
+        attributes = credentialsSupport.getAttributes(sc);
+        assertNotNull(attributes);
+        assertEquals(3, attributes.size());
+        assertEquals(expected, attributes);
+    }
+
+    @Test
+    public void testSetAttributesFalse() {
+        assertFalse(credentialsSupport.setAttributes(new Credentials() {}, ImmutableMap.of("a", "value")));
     }
 
     private static final class TestCredentials implements Credentials {}

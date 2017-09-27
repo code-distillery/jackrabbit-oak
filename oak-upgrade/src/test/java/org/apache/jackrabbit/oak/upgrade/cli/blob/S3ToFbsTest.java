@@ -23,7 +23,7 @@ import org.apache.jackrabbit.oak.upgrade.cli.container.BlobStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.FileBlobStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.NodeStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.S3DataStoreContainer;
-import org.apache.jackrabbit.oak.upgrade.cli.container.SegmentNodeStoreContainer;
+import org.apache.jackrabbit.oak.upgrade.cli.container.SegmentTarNodeStoreContainer;
 import org.junit.Assume;
 
 public class S3ToFbsTest extends AbstractOak2OakTest {
@@ -39,11 +39,11 @@ public class S3ToFbsTest extends AbstractOak2OakTest {
     private final NodeStoreContainer destination;
 
     public S3ToFbsTest() throws IOException {
-        Assume.assumeTrue(S3_PROPERTIES != null);
+        Assume.assumeTrue(S3_PROPERTIES != null && !S3_PROPERTIES.isEmpty());
         sourceBlob = new S3DataStoreContainer(S3_PROPERTIES);
         destinationBlob = new FileBlobStoreContainer();
-        source = new SegmentNodeStoreContainer(sourceBlob);
-        destination = new SegmentNodeStoreContainer(destinationBlob);
+        source = new SegmentTarNodeStoreContainer(sourceBlob);
+        destination = new SegmentTarNodeStoreContainer(destinationBlob);
     }
 
     @Override
@@ -61,5 +61,10 @@ public class S3ToFbsTest extends AbstractOak2OakTest {
         return new String[] { "--copy-binaries", "--src-s3datastore", sourceBlob.getDescription(), "--src-s3config",
                 S3_PROPERTIES, "--fileblobstore", destinationBlob.getDescription(), source.getDescription(),
                 destination.getDescription() };
+    }
+
+    @Override
+    protected boolean supportsCheckpointMigration() {
+        return true;
     }
 }

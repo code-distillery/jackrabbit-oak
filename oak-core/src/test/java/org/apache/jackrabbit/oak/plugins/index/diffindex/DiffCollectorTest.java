@@ -26,7 +26,7 @@ import java.util.Set;
 
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.index.FilterImpl;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
@@ -45,7 +45,7 @@ public class DiffCollectorTest {
 
         UUIDDiffCollector collector = new UUIDDiffCollector(root, after);
 
-        FilterImpl f = new FilterImpl();
+        FilterImpl f = FilterImpl.newTestInstance();
         f.restrictProperty("jcr:uuid", Operator.EQUAL,
                 PropertyValues.newString("abc"));
 
@@ -71,7 +71,7 @@ public class DiffCollectorTest {
 
         UUIDDiffCollector collector = new UUIDDiffCollector(before, after);
 
-        FilterImpl f = new FilterImpl();
+        FilterImpl f = FilterImpl.newTestInstance();
         f.restrictProperty("jcr:uuid", Operator.EQUAL,
                 PropertyValues.newString("xyz"));
 
@@ -111,7 +111,7 @@ public class DiffCollectorTest {
 
         UUIDDiffCollector collector = new UUIDDiffCollector(before, after);
 
-        FilterImpl f = new FilterImpl();
+        FilterImpl f = FilterImpl.newTestInstance();
         f.restrictProperty("jcr:uuid", Operator.EQUAL, PropertyValues
                 .newString("ee59b554-76b7-3e27-9fc6-15bda1388894"));
 

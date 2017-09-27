@@ -20,14 +20,14 @@ import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.collect.ImmutableList.of;
 import static javax.jcr.query.Query.JCR_SQL2;
 import static org.apache.jackrabbit.JcrConstants.JCR_PRIMARYTYPE;
-import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
 import static org.apache.jackrabbit.oak.api.Type.NAME;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NT_OAK_UNSTRUCTURED;
-import static org.apache.jackrabbit.oak.query.QueryEngineImpl.QuerySelectionMode.CHEAPEST;
+import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.NT_OAK_UNSTRUCTURED;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.apache.jackrabbit.oak.query.QueryEngineImpl.QuerySelectionMode.ALTERNATIVE;
+import static org.apache.jackrabbit.oak.query.QueryEngineImpl.QuerySelectionMode.CHEAPEST;
 import static org.apache.jackrabbit.oak.query.QueryEngineImpl.QuerySelectionMode.ORIGINAL;
 import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertThat;
@@ -44,13 +44,13 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentRepository;
 import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.namepath.LocalNameMapper;
+import org.apache.jackrabbit.oak.namepath.impl.LocalNameMapper;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.namepath.NamePathMapperImpl;
+import org.apache.jackrabbit.oak.namepath.impl.NamePathMapperImpl;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
-import org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent;
+import org.apache.jackrabbit.oak.InitialContent;
+import org.apache.jackrabbit.oak.query.ast.NodeTypeInfoProvider;
 import org.apache.jackrabbit.oak.spi.security.OpenSecurityProvider;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.junit.Test;
 
@@ -187,7 +187,8 @@ public class SQL2OptimiseQueryTest extends  AbstractQueryTest {
      */
     @Test
     public void optimise() throws ParseException {
-        SQL2Parser parser = new SQL2Parser(getMappings(), getTypes(), qeSettings);
+        SQL2Parser parser = SQL2ParserTest.createTestSQL2Parser(
+                getMappings(), getNodeTypes(), qeSettings);
         String statement;
         Query original, optimised;
 
@@ -227,13 +228,61 @@ public class SQL2OptimiseQueryTest extends  AbstractQueryTest {
         assertNotSame(original, optimised);
     }
     
+    /**
+     * ensure that an optimisation is available for the provided queries.
+     * 
+     * @throws ParseException
+     */
+    @Test
+    public void optimiseAndOrAnd() throws ParseException {
+        optimiseAndOrAnd(
+                "select * from [nt:unstructured] as [c] " + 
+                "where isdescendantnode('/tmp') " + 
+                "and ([a]=1 or [b]=2) and ([c]=3 or [d]=4)",
+                "(isdescendantnode(c, /tmp)) and (d = 4) and (b = 2), " + 
+                "(isdescendantnode(c, /tmp)) and (d = 4) and (a = 1), " + 
+                "(isdescendantnode(c, /tmp)) and (c = 3) and (b = 2), " + 
+                "(isdescendantnode(c, /tmp)) and (c = 3) and (a = 1)");
+        optimiseAndOrAnd(
+                "select * from [nt:unstructured] as [c] " + 
+                "where ([a]=1 or [b]=2) and ([x]=3 or [y]=4)",
+                "(y = 4) and (b = 2), " + 
+                "(y = 4) and (a = 1), " + 
+                "(x = 3) and (b = 2), " + 
+                "(x = 3) and (a = 1)");
+        optimiseAndOrAnd(
+                "select * from [nt:unstructured] as [c] " + 
+                "where ([a]=1 or [b]=2 or ([c]=3 and [d]=4)) and ([x]=5 or [y]=6)",
+                "(y = 6) and ((c = 3) and (d = 4)), " + 
+                "(y = 6) and (b = 2), " + 
+                "(y = 6) and (a = 1), " + 
+                "(x = 5) and ((c = 3) and (d = 4)), " + 
+                "(x = 5) and (b = 2), " + 
+                "(x = 5) and (a = 1)");
+    }
+    
+    private void optimiseAndOrAnd(String statement, String expected) throws ParseException {
+        SQL2Parser parser = SQL2ParserTest.createTestSQL2Parser(
+                getMappings(), getNodeTypes(), qeSettings);
+        Query original;
+        original = parser.parse(statement, false);
+        assertNotNull(original);
+        String optimized = original.buildAlternativeQuery().toString();
+        optimized = optimized.replaceAll("\\[", "").replaceAll("\\]","");
+        optimized = optimized.replaceAll("select c.jcr:primaryType as c.jcr:primaryType ", "");
+        optimized = optimized.replaceAll("from nt:unstructured as c where ", "");
+        optimized = optimized.replaceAll("c\\.", "");
+        optimized = optimized.replaceAll(" union ", ", ");
+        assertEquals(expected,  optimized);
+    }
+    
     private NamePathMapper getMappings() {
         return new NamePathMapperImpl(
             new LocalNameMapper(root, QueryEngine.NO_MAPPINGS));
     }
     
-    private NodeState getTypes() {
-        return store.getRoot().getChildNode(JCR_SYSTEM).getChildNode(JCR_NODE_TYPES);
+    private static NodeTypeInfoProvider getNodeTypes() {
+        return new NodeStateNodeTypeInfoProvider(INITIAL_CONTENT);
     }
     
     @Override

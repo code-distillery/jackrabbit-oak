@@ -16,17 +16,31 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.lucene;
 
-import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
 import org.apache.lucene.util.Version;
 
 public interface LuceneIndexConstants {
 
+    enum IndexingMode {
+        SYNC,
+        NRT,
+        ASYNC;
+
+        public String asyncValueName(){
+            return name().toLowerCase();
+        }
+
+        public static IndexingMode from(String indexingMode){
+            return valueOf(indexingMode.toUpperCase());
+        }
+    }
+
     String TYPE_LUCENE = "lucene";
 
     String INDEX_DATA_CHILD_NAME = ":data";
+
+    String SUGGEST_DATA_CHILD_NAME = ":suggest-data";
 
     String TRASH_CHILD_NAME = ":trash";
 
@@ -51,8 +65,6 @@ public interface LuceneIndexConstants {
     String PERSISTENCE_FILE = "file";
 
     String PERSISTENCE_PATH = "path";
-
-    String INDEX_DATA_CHILD_NAME_FS = "data";
 
     /**
      * Experimental flag to control storage behavior: 'null' or 'true' means the content is stored
@@ -85,11 +97,6 @@ public interface LuceneIndexConstants {
     String ORDERED_PROP_NAMES = "orderedProps";
 
     /**
-     * Actively the data store files after this many hours.
-     */
-    String ACTIVE_DELETE = "activeDelete";
-
-    /**
      * Size in bytes used for splitting the index files when storing them in NodeStore
      */
     String BLOB_SIZE = "blobSize";
@@ -105,6 +112,11 @@ public interface LuceneIndexConstants {
      * Name of the codec to be used for indexing
      */
     String CODEC_NAME = "codec";
+
+    /**
+     * Name of the merge policy to be used while indexing
+     */
+    String MERGE_POLICY_NAME = "mergePolicy";
 
     /**
      * Child node name under which property details are provided
@@ -140,6 +152,8 @@ public interface LuceneIndexConstants {
     String PROP_ORDERED = "ordered";
 
     String PROP_SCORER_PROVIDER = "scorerProviderName";
+
+    String PROP_WEIGHT = "weight";
 
     /**
      * Integer property indicating that LuceneIndex should be
@@ -196,6 +210,14 @@ public interface LuceneIndexConstants {
     String COST_PER_EXECUTION = "costPerExecution";
 
     /**
+     * Boolean property indicating if in-built analyzer should preserve original term
+     * (i.e. use
+     * {@link org.apache.lucene.analysis.miscellaneous.WordDelimiterFilter#PRESERVE_ORIGINAL}
+     * flag)
+     */
+    String INDEX_ORIGINAL_TERM = "indexOriginalTerm";
+
+    /**
      * Node name under which various analyzers are configured
      */
     String ANALYZERS = "analyzers";
@@ -225,15 +247,27 @@ public interface LuceneIndexConstants {
     String TIKA_MAX_EXTRACT_LENGTH = "maxExtractLength";
 
     /**
+     *  Config node under tika which defines mime type mappings
+     */
+    String TIKA_MIME_TYPES = "mimeTypes";
+
+    /**
+     * Property name within the mime type structure which defines a mime type mapping
+     */
+    String TIKA_MAPPED_TYPE = "mappedType";
+
+    /**
      * The maximum number of terms that will be indexed for a single field in a
      * document.  This limits the amount of memory required for indexing, so that
      * collections with very large files will not crash the indexing process by
-     * running out of memory.<p/>
+     * running out of memory.
+     * <p>
      * Note that this effectively truncates large documents, excluding from the
      * index terms that occur further in the document.  If you know your source
      * documents are large, be sure to set this value high enough to accommodate
      * the expected size.  If you set it to Integer.MAX_VALUE, then the only limit
-     * is your memory, but you should anticipate an OutOfMemoryError.<p/>
+     * is your memory, but you should anticipate an OutOfMemoryError.
+     * <p>
      * By default, no more than 10,000 terms will be indexed for a field.
      */
     String MAX_FIELD_LENGTH = "maxFieldLength";
@@ -294,7 +328,10 @@ public interface LuceneIndexConstants {
      * definition is defined is not known to IndexEditor. To make use of CopyOnWrite
      * feature its required to know the indexPath to optimize the lookup and read of
      * existing index files
+     *
+     * @deprecated With OAK-4152 no need to explicitly define indexPath property
      */
+    @Deprecated
     String INDEX_PATH = "indexPath";
 
     /**
@@ -315,6 +352,13 @@ public interface LuceneIndexConstants {
     String PROP_SECURE_FACETS = "secure";
 
     /**
+     * Optional (index definition) property indicating max number of facets that will be retrieved
+     * in query
+     * Default is {@link IndexDefinition#DEFAULT_FACET_COUNT}
+     */
+    String PROP_FACETS_TOP_CHILDREN = "topChildren";
+
+    /**
      * Optional (property definition) property indicating whether facets should be created
      * for this property
      */
@@ -324,4 +368,14 @@ public interface LuceneIndexConstants {
      * Boolean property indicate that property should not be included in aggregation
      */
     String PROP_EXCLUDE_FROM_AGGREGATE = "excludeFromAggregation";
+
+    /**
+     * String property: the function to index, for function-based index
+     */
+    String PROP_FUNCTION = "function";
+
+    /**
+     * Boolean property which signal LuceneIndexEditor to refresh the stored index definition
+     */
+    String PROP_REFRESH_DEFN = "refresh";
 }

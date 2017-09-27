@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.TreeMap;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -35,12 +36,12 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.commons.PathUtils;
-import org.apache.jackrabbit.oak.query.QueryEngineSettings;
+import org.apache.jackrabbit.oak.spi.query.QueryLimits;
 import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.NativeFunctionImpl;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
-import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextExpression;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.security.authorization.permission.PermissionProvider;
 
@@ -56,7 +57,7 @@ public class FilterImpl implements Filter {
     
     private final String queryStatement;
     
-    private final QueryEngineSettings settings;
+    private final QueryLimits settings;
 
     /**
      * Whether the filter is always false.
@@ -110,9 +111,43 @@ public class FilterImpl implements Filter {
     private boolean preparing;
 
     // TODO support "order by"
+
+    /**
+     * Create a new filter instance that is used for unit testing. This method
+     * is relatively slow, because it creates a new query engine setting object.
+     * Therefore, it is only to be used for testing. At runtime, the
+     * public constructor should be used instead.
+     * 
+     * @return the filter
+     */
+    public static FilterImpl newTestInstance() {
+        return new FilterImpl();
+    }
     
-    public FilterImpl() {
-        this(null, null, new QueryEngineSettings());
+    private FilterImpl() {
+        this(null, null, new QueryLimits() {
+
+            @Override
+            public long getLimitInMemory() {
+                return Long.MAX_VALUE;
+            }
+
+            @Override
+            public long getLimitReads() {
+                return Long.MAX_VALUE;
+            }
+
+            @Override
+            public boolean getFullTextComparisonWithoutIndex() {
+                return false;
+            }
+
+            @Override
+            public boolean getFailTraversal() {
+                return false;
+            }
+            
+        });
     }
 
     /**
@@ -121,7 +156,7 @@ public class FilterImpl implements Filter {
      * @param selector the selector for the given filter
      * @param queryStatement the query statement
      */
-    public FilterImpl(SelectorImpl selector, String queryStatement, QueryEngineSettings settings) {
+    public FilterImpl(SelectorImpl selector, String queryStatement, QueryLimits settings) {
         this.selector = selector;
         this.queryStatement = queryStatement;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
@@ -142,7 +177,7 @@ public class FilterImpl implements Filter {
         this.selector = impl.selector;
         this.matchesAllTypes = selector != null ? selector.matchesAllTypes()
                 : false;
-        this.settings = filter.getQueryEngineSettings();
+        this.settings = filter.getQueryLimits();
     }
 
     public void setPreparing(boolean preparing) {
@@ -405,8 +440,9 @@ public class FilterImpl implements Filter {
         buff.append(", path=").append(getPathPlan());
         if (!propertyRestrictions.isEmpty()) {
             buff.append(", property=[");
-            Iterator<Entry<String, Collection<PropertyRestriction>>> iterator = propertyRestrictions
-                    .asMap().entrySet().iterator();
+            Iterator<Entry<String, Collection<PropertyRestriction>>> iterator = 
+                    new TreeMap<String, Collection<PropertyRestriction>>(propertyRestrictions
+                    .asMap()).entrySet().iterator();
             while (iterator.hasNext()) {
                 Entry<String, Collection<PropertyRestriction>> p = iterator.next();
                 buff.append(p.getKey()).append("=").append(p.getValue());
@@ -589,7 +625,7 @@ public class FilterImpl implements Filter {
     }
 
     @Override
-    public QueryEngineSettings getQueryEngineSettings() {
+    public QueryLimits getQueryLimits() {
         return settings;
     }
 

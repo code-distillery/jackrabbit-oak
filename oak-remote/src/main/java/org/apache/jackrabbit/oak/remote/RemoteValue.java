@@ -28,7 +28,7 @@ public class RemoteValue {
 
     /**
      * A generic interface to represent a supplier of an item.
-     * <p/>
+     * <p>
      * In the specific, it is used by values whose underlying implementation is
      * an {@code InputStream}. To enable multiple traversals of {@code
      * InputStream}s, the value is wrapped by this interface to effectively have
@@ -451,7 +451,7 @@ public class RemoteValue {
             }
 
             @Override
-            public Boolean asBoolean() {
+            public boolean asBoolean() {
                 return value;
             }
 
@@ -1023,8 +1023,8 @@ public class RemoteValue {
      * @return The value of this remote value if this remote value is of type
      * boolean, false otherwise.
      */
-    public Boolean asBoolean() {
-        return null;
+    public boolean asBoolean() {
+        return false;
     }
 
     /**

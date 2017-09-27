@@ -38,13 +38,16 @@ import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.commons.UUIDUtils;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyBuilder;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
+import org.apache.jackrabbit.oak.plugins.nodetype.TypePredicate;
 import org.apache.jackrabbit.oak.plugins.tree.RootFactory;
 import org.apache.jackrabbit.oak.plugins.tree.TreeFactory;
+import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.util.ISO8601;
 import org.apache.jackrabbit.util.Text;
 
@@ -66,9 +69,9 @@ import static org.apache.jackrabbit.JcrConstants.NT_VERSION;
 import static org.apache.jackrabbit.JcrConstants.NT_VERSIONHISTORY;
 import static org.apache.jackrabbit.JcrConstants.NT_VERSIONLABELS;
 import static org.apache.jackrabbit.oak.plugins.version.Utils.uuidFromNode;
-import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.JCR_COPIED_FROM;
-import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.REP_VERSIONSTORAGE;
-import static org.apache.jackrabbit.oak.plugins.version.VersionConstants.VERSION_STORE_PATH;
+import static org.apache.jackrabbit.oak.spi.version.VersionConstants.JCR_COPIED_FROM;
+import static org.apache.jackrabbit.oak.spi.version.VersionConstants.REP_VERSIONSTORAGE;
+import static org.apache.jackrabbit.oak.spi.version.VersionConstants.VERSION_STORE_PATH;
 
 /**
  * Extends the {@link ReadOnlyVersionManager} with methods to modify the
@@ -78,12 +81,14 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
 
     private final NodeBuilder versionStorageNode;
     private final NodeBuilder workspaceRoot;
+    private final TypePredicate isVersion;
     private ReadOnlyNodeTypeManager ntMgr;
 
     public ReadWriteVersionManager(NodeBuilder versionStorageNode,
                             NodeBuilder workspaceRoot) {
         this.versionStorageNode = checkNotNull(versionStorageNode);
         this.workspaceRoot = checkNotNull(workspaceRoot);
+        this.isVersion = new TypePredicate(workspaceRoot.getNodeState(), NT_VERSION);
     }
 
     @Nonnull
@@ -150,7 +155,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
             // jcr:versionableUuid property
             node.setProperty(JCR_VERSIONABLEUUID, vUUID, Type.STRING);
             node.setProperty(JCR_UUID,
-                    IdentifierManager.generateUUID(), Type.STRING);
+                    UUIDUtils.generateUUID(), Type.STRING);
 
             // jcr:versionLabels child node
             NodeBuilder vLabels = node.child(JCR_VERSIONLABELS);
@@ -194,7 +199,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
             pb.setName(JCR_PREDECESSORS).setValues(successor.getProperty(JCR_PREDECESSORS).getValue(Type.REFERENCES));
 
             pb.removeValue(versionId);
-            pb.setValues(predecessorIds.getValue(Type.REFERENCES));
+            pb.addValues(predecessorIds.getValue(Type.REFERENCES));
 
             successor.setProperty(pb.getPropertyState());
         }
@@ -205,7 +210,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
             pb.setName(JCR_SUCCESSORS).setValues(predecessor.getProperty(JCR_SUCCESSORS).getValue(Type.REFERENCES));
 
             pb.removeValue(versionId);
-            pb.setValues(successorIds.getValue(Type.REFERENCES));
+            pb.addValues(successorIds.getValue(Type.REFERENCES));
 
             predecessor.setProperty(pb.getPropertyState());
         }
@@ -305,6 +310,18 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
         labels.removeProperty(label);
     }
 
+    /**
+     * Removes the version history if it's empty.
+     *
+     * @param versionable the versionable node.
+     */
+    void removeEmptyHistory(@Nonnull NodeState versionable) {
+        NodeBuilder history = getVersionHistory(versionable);
+        if (isEmptyHistory(history.getNodeState())) {
+            history.remove();
+        }
+    }
+
     // TODO: more methods that modify versions
 
     //------------------------------< internal >--------------------------------
@@ -356,7 +373,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
             predecessors = ImmutableList.copyOf(state.getValue(Type.REFERENCES));
             version = vHistory.child(calculateVersion(vHistory, versionable));
         }
-        String versionUUID = IdentifierManager.generateUUID();
+        String versionUUID = UUIDUtils.generateUUID();
         version.setProperty(JCR_UUID, versionUUID, Type.STRING);
         version.setProperty(JCR_PRIMARYTYPE, NT_VERSION, Type.NAME);
         version.setProperty(JCR_CREATED, ISO8601.format(Calendar.getInstance()), Type.DATE);
@@ -435,8 +452,8 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
      *      does not exist, that name is used.
      * <li> otherwise a ".0" is added to the name until a non conflicting name
      *      is found.
-     * <ul>
-     * </p>
+     * </ul>
+     * <p>
      * Example Graph:
      * <pre>
      * jcr:rootVersion
@@ -560,4 +577,55 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
         }
         return null;
     }
+
+    /**
+     * Gets the version history for the given
+     * {@code versionable} node.
+     *
+     * @param versionable the versionable node.
+     * @return the version history node.
+     * @throws IllegalArgumentException if the given node does not have a
+     *                                  {@code jcr:uuid} property.
+     */
+    @Nonnull
+    private NodeBuilder getVersionHistory(@Nonnull NodeState versionable) {
+        checkNotNull(versionable);
+        String vUUID = uuidFromNode(versionable);
+        String relPath = getVersionHistoryPath(vUUID);
+        NodeBuilder node = versionStorageNode;
+        for (Iterator<String> it = PathUtils.elements(relPath).iterator(); it.hasNext(); ) {
+            String name = it.next();
+            node = node.getChildNode(name);
+            if (!node.exists()) {
+                throw new IllegalArgumentException("No version history for this node");
+            }
+        }
+        return node;
+    }
+
+    /**
+     * Checks whether the passed node history hasn't been modified since its
+     * creation. It means that: (1) there's just one version, called jcr:rootVersion
+     * and (2) there are no custom labels.
+     *
+     * @param versionHistory to test
+     * @return {@code true} if the version history hasn't been changed yet
+     */
+    private boolean isEmptyHistory(NodeState versionHistory) {
+        for (ChildNodeEntry entry : versionHistory.getChildNodeEntries()) {
+            String name = entry.getName();
+            NodeState node = entry.getNodeState();
+            if (!JCR_ROOTVERSION.equals(name) && isVersion.apply(node)) {
+                return false; // a checked-in version
+            }
+        }
+        NodeState labels = versionHistory.getChildNode(JCR_VERSIONLABELS);
+        for (PropertyState prop : labels.getProperties()) {
+            if (prop.getType() == Type.REFERENCE) {
+                return false; // custom label
+            }
+        }
+        return true;
+    }
+
 }

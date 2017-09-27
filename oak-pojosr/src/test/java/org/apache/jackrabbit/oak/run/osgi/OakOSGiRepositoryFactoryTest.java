@@ -70,12 +70,13 @@ public class OakOSGiRepositoryFactoryTest {
     private boolean calledOnStop;
 
     @Rule
-    public final TemporaryFolder tmpFolder = new TemporaryFolder();
+    public final TemporaryFolder tmpFolder = new TemporaryFolder(new File("target"));
 
     @Before
     public void setUp() throws IOException {
         repositoryHome = tmpFolder.getRoot().getAbsolutePath();
         config.put("org.apache.jackrabbit.repository.home", repositoryHome);
+        config.put("repository.home", repositoryHome);
 
         File repoHome = new File(repositoryHome);
         if (repoHome.exists()) {

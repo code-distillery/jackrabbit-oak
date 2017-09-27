@@ -34,7 +34,7 @@ import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restrict
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBits;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeBitsProvider;
 import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +48,7 @@ class PermissionStoreImpl implements PermissionStore, PermissionConstants {
      */
     private static final Logger log = LoggerFactory.getLogger(PermissionStoreImpl.class);
 
-    private final String workspaceName;
+    private final String permissionRootName;
 
     private final RestrictionProvider restrictionProvider;
 
@@ -57,19 +57,20 @@ class PermissionStoreImpl implements PermissionStore, PermissionConstants {
     private Tree permissionsTree;
     private PrivilegeBits allBits;
 
-    PermissionStoreImpl(Root root, String workspaceName, RestrictionProvider restrictionProvider) {
-        this.workspaceName = workspaceName;
+    PermissionStoreImpl(Root root, String permissionRootName, RestrictionProvider restrictionProvider) {
+        this.permissionRootName = permissionRootName;
         this.restrictionProvider = restrictionProvider;
         reset(root);
     }
 
-    void flush(@Nonnull Root root) {
+    @Override
+    public void flush(@Nonnull Root root) {
         principalTreeMap.clear();
         reset(root);
     }
 
     private void reset(@Nonnull Root root) {
-        permissionsTree = PermissionUtil.getPermissionsRoot(root, workspaceName);
+        permissionsTree = PermissionUtil.getPermissionsRoot(root, permissionRootName);
         allBits = new PrivilegeBitsProvider(root).getBits(PrivilegeConstants.JCR_ALL);
     }
 

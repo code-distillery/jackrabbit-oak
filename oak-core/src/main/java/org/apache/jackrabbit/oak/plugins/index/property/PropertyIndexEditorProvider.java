@@ -18,15 +18,16 @@ package org.apache.jackrabbit.oak.plugins.index.property;
 
 import javax.annotation.Nonnull;
 
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Property;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.IndexEditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
 import org.apache.jackrabbit.oak.plugins.index.IndexUpdateCallback;
+import org.apache.jackrabbit.oak.spi.mount.MountInfoProvider;
+import org.apache.jackrabbit.oak.spi.mount.Mounts;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Reference;
 
 /**
  * Service that provides PropertyIndex based editors.
@@ -35,20 +36,27 @@ import org.apache.jackrabbit.oak.spi.state.NodeState;
  * @see IndexEditorProvider
  * 
  */
-@Component
-@Property(name = IndexConstants.TYPE_PROPERTY_NAME , value = "property", propertyPrivate = true)
-@Service(IndexEditorProvider.class)
+@Component(
+        service = IndexEditorProvider.class,
+        property = IndexConstants.TYPE_PROPERTY_NAME + "=property")
 public class PropertyIndexEditorProvider implements IndexEditorProvider {
 
     public static final String TYPE = "property";
+
+    @Reference
+    private MountInfoProvider mountInfoProvider = Mounts.defaultMountInfoProvider();
 
     @Override
     public Editor getIndexEditor(
             @Nonnull String type, @Nonnull NodeBuilder definition, @Nonnull NodeState root, @Nonnull IndexUpdateCallback callback) {
         if (TYPE.equals(type)) {
-            return new PropertyIndexEditor(definition, root, callback);
+            return new PropertyIndexEditor(definition, root, callback, mountInfoProvider);
         }
         return null;
     }
 
+    public PropertyIndexEditorProvider with(MountInfoProvider mountInfoProvider) {
+        this.mountInfoProvider = mountInfoProvider;
+        return this;
+    }
 }

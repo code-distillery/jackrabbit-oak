@@ -23,7 +23,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.tree.TreeLocation;
 import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.apache.jackrabbit.util.Text;
 
 final class UserContext implements Context, UserConstants {
@@ -42,7 +42,7 @@ final class UserContext implements Context, UserConstants {
     public boolean definesProperty(@Nonnull Tree parent, @Nonnull PropertyState property) {
         String propName = property.getName();
         String ntName = TreeUtil.getPrimaryTypeName(parent);
-        if (NT_REP_USER.equals(ntName)) {
+        if (NT_REP_USER.equals(ntName) || NT_REP_SYSTEM_USER.equals(ntName)) {
             return USER_PROPERTY_NAMES.contains(propName);
         } else if (NT_REP_GROUP.equals(ntName)) {
             return GROUP_PROPERTY_NAMES.contains(propName);

@@ -24,6 +24,7 @@ import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import javax.jcr.PropertyType;
@@ -34,6 +35,7 @@ import org.apache.jackrabbit.oak.api.QueryEngine;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.query.QueryOptions.Traversal;
 import org.apache.jackrabbit.oak.query.ast.AstElementFactory;
 import org.apache.jackrabbit.oak.query.ast.BindVariableValueImpl;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
@@ -42,6 +44,8 @@ import org.apache.jackrabbit.oak.query.ast.DynamicOperandImpl;
 import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
 import org.apache.jackrabbit.oak.query.ast.JoinType;
 import org.apache.jackrabbit.oak.query.ast.LiteralImpl;
+import org.apache.jackrabbit.oak.query.ast.NodeTypeInfo;
+import org.apache.jackrabbit.oak.query.ast.NodeTypeInfoProvider;
 import org.apache.jackrabbit.oak.query.ast.Operator;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
 import org.apache.jackrabbit.oak.query.ast.PropertyExistenceImpl;
@@ -50,8 +54,9 @@ import org.apache.jackrabbit.oak.query.ast.PropertyValueImpl;
 import org.apache.jackrabbit.oak.query.ast.SelectorImpl;
 import org.apache.jackrabbit.oak.query.ast.SourceImpl;
 import org.apache.jackrabbit.oak.query.ast.StaticOperandImpl;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.query.stats.QueryStatsData.QueryExecutionStats;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
+import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,7 +78,7 @@ public class SQL2Parser {
     private static final int KEYWORD = 1, IDENTIFIER = 2, PARAMETER = 3, END = 4, VALUE = 5;
     private static final int MINUS = 12, PLUS = 13, OPEN = 14, CLOSE = 15;
 
-    private final NodeState types;
+    private final NodeTypeInfoProvider nodeTypes;
 
     // The query as an array of characters and character types
     private String statement;
@@ -109,16 +114,21 @@ public class SQL2Parser {
     
     private boolean literalUsageLogged;
 
+    private final QueryExecutionStats stats;
+
     /**
      * Create a new parser. A parser can be re-used, but it is not thread safe.
      * 
      * @param namePathMapper the name-path mapper to use
-     * @param types the node with the node type information
+     * @param nodeTypes the nodetypes
+     * @param settings the query engine settings
      */
-    public SQL2Parser(NamePathMapper namePathMapper, NodeState types, QueryEngineSettings settings) {
+    public SQL2Parser(NamePathMapper namePathMapper, NodeTypeInfoProvider nodeTypes, QueryEngineSettings settings,
+            QueryExecutionStats stats) {
         this.namePathMapper = namePathMapper;
-        this.types = checkNotNull(types);
+        this.nodeTypes = checkNotNull(nodeTypes);
         this.settings = checkNotNull(settings);
+        this.stats = checkNotNull(stats);
     }
 
     /**
@@ -159,6 +169,26 @@ public class SQL2Parser {
             read("BY");
             orderings = parseOrder();
         }
+        QueryOptions options = new QueryOptions();
+        if (readIf("OPTION")) {
+            read("(");
+            while (true) {
+                if (readIf("TRAVERSAL")) {
+                    String n = readName().toUpperCase(Locale.ENGLISH);
+                    options.traversal = Traversal.valueOf(n);
+                } else if (readIf("INDEX")) {
+                    if (readIf("NAME")) {
+                        options.indexName = readName();
+                    } else if (readIf("TAG")) {
+                        options.indexTag = readLabel();
+                    }
+                } else {
+                    break;
+                }
+                readIf(",");
+            }
+            read(")");
+        }
         if (!currentToken.isEmpty()) {
             throw getSyntaxError("<end>");
         }
@@ -166,6 +196,7 @@ public class SQL2Parser {
         q.setExplain(explain);
         q.setMeasure(measure);
         q.setInternal(isInternal(query));
+        q.setQueryOptions(options);
 
         if (initialise) {
             try {
@@ -196,8 +227,8 @@ public class SQL2Parser {
         boolean distinct = readIf("DISTINCT");
         ArrayList<ColumnOrWildcard> list = parseColumns();
         if (supportSQL1) {
-            addColumnIfNecessary(list, QueryImpl.JCR_PATH, QueryImpl.JCR_PATH);
-            addColumnIfNecessary(list, QueryImpl.JCR_SCORE, QueryImpl.JCR_SCORE);
+            addColumnIfNecessary(list, QueryConstants.JCR_PATH, QueryConstants.JCR_PATH);
+            addColumnIfNecessary(list, QueryConstants.JCR_SCORE, QueryConstants.JCR_SCORE);
         }
         read("FROM");
         SourceImpl source = parseSource();
@@ -207,7 +238,7 @@ public class SQL2Parser {
             constraint = parseConstraint();
         }
         QueryImpl q = new QueryImpl(
-                statement, source, constraint, columnArray, namePathMapper, settings);
+                statement, source, constraint, columnArray, namePathMapper, settings, stats);
         q.setDistinct(distinct);
         return q;
     }
@@ -247,8 +278,8 @@ public class SQL2Parser {
                 throw e2;
             }
         }
-        NodeState type = types.getChildNode(nodeTypeName);
-        if (!type.exists()) {
+        NodeTypeInfo nodeTypeInfo = nodeTypes.getNodeTypeInfo(nodeTypeName);
+        if (!nodeTypeInfo.exists()) {
             throw getSyntaxError("unknown node type");
         }
 
@@ -257,7 +288,15 @@ public class SQL2Parser {
             selectorName = readName();
         }
 
-        return factory.selector(type, selectorName);
+        return factory.selector(nodeTypeInfo, selectorName);
+    }
+    
+    private String readLabel() throws ParseException {
+        String label = readName();
+        if (!label.matches("[a-zA-Z0-9_]*") || label.isEmpty() || label.length() > 128) {
+            throw getSyntaxError("a-z, A-Z, 0-9, _");
+        }
+        return label;
     }
 
     private String readName() throws ParseException {
@@ -624,7 +663,7 @@ public class SQL2Parser {
     private DynamicOperandImpl parseExpressionFunction(String functionName) throws ParseException {
         DynamicOperandImpl op;
         if ("LENGTH".equalsIgnoreCase(functionName)) {
-            op = factory.length(parsePropertyValue(readName()));
+            op = factory.length(parseDynamicOperand());
         } else if ("NAME".equalsIgnoreCase(functionName)) {
             if (isToken(")")) {
                 op = factory.nodeName(getOnlySelectorName());
@@ -781,7 +820,7 @@ public class SQL2Parser {
         int propertyType = getPropertyTypeFromName(currentToken);
         read();
 
-        PropertyValue v = PropertyValues.convert(value, propertyType, null);
+        PropertyValue v = ValueConverter.convert(value, propertyType, null);
         if (v == null) {
             throw getSyntaxError("data type (STRING|BINARY|...)");
         }
@@ -1229,14 +1268,17 @@ public class SQL2Parser {
             readDecimal(i - 1, i);
             return;
         case CHAR_BRACKETED:
+            currentTokenQuoted = true;
             readString(i, ']');
             currentTokenType = IDENTIFIER;
             currentToken = currentValue.getValue(Type.STRING);
             return;
         case CHAR_STRING:
+            currentTokenQuoted = true;
             readString(i, '\'');
             return;
         case CHAR_QUOTED:
+            currentTokenQuoted = true;
             readString(i, '\"');
             if (supportSQL1) {
                 // for SQL-2, this is a literal, as defined in

@@ -63,10 +63,8 @@ If a user needs re-authentication (for example, if the cache validity expired or
 if the user is not yet present in the local system at all), the login module must
 check the credentials with the external system during the `login()` method.
 
-Note:
-
-* users (and groups) that are synced from the 3rd party system contain a `rep:externalId` property. This allows to identify the external users and distinguish them from others.
-* to reduce expensive syncing, the synced users and groups have sync timestamp `rep:lastSynced` and are considered valid for a configurable time. if they expire, they need to be validated against the 3rd party system again.
+The details of the default user/group synchronization mechanism are described in section
+[User and Group Synchronization : The Default Implementation](external/defaultusersync.html)
 
 ##### Supported Credentials
 
@@ -84,7 +82,10 @@ The details of the external authentication are as follows:
 
 _Phase 1: Login_
 
-* if the user exists in the repository and is not an externally synced, **return `false`**
+* if the user exists in the repository and any of the following conditions is met **return `false`**
+    * user is not an externally synced _or_
+    * user belongs to a different IDP than configured for the `ExternalLoginModule` _or_
+    * [`PreAuthenticatedLogin`](preauthentication.html) is present on the shared state _and_ the external user doesn't require an updating sync ([OAK-3508])
 * if the user exists in the 3rd party system but the credentials don't match it **throws `LoginException`**
 * if the user exists in the 3rd party system and the credentials match
     * put the credentials in the shared and private state
@@ -97,6 +98,8 @@ _Phase 2: Commit_
 * if there is no credentials in the private state, it **returns `false`**
 * if there are credentials in the private state propagate the subject and **return `true`**
 
+See section [Example Configurations](external/externallogin_examples.html) for 
+some common setup scenarios.
 
 #### External Identity Provider
 
@@ -254,3 +257,4 @@ handles the same set of supported credentials!
 [SyncManager]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/authentication/external/SyncManager.html
 [SyncManagerImpl]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/authentication/external/impl/SyncManagerImpl.html
 [CredentialsSupport]: /oak/docs/apidocs/org/apache/jackrabbit/oak/spi/security/authentication/credentials/CredentialsSupport.html
+[OAK-3508]: https://issues.apache.org/jira/browse/OAK-3508

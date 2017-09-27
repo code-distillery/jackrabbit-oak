@@ -67,6 +67,92 @@ public class QueryTest extends AbstractRepositoryTest {
     public QueryTest(NodeStoreFixture fixture) {
         super(fixture);
     }
+    
+    @Test
+    public void traversalOption() throws Exception {
+        Session session = getAdminSession();
+        QueryManager qm = session.getWorkspace().getQueryManager();
+        
+        // for union queries:
+        // both subqueries use an index
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] where ischildnode('/') or [jcr:uuid] = 1 option(traversal fail)"));
+        // no subquery uses an index
+        assertFalse(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] where [x] = 1 or [y] = 2 option(traversal fail)"));
+        // first one does not, second one does
+        assertFalse(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] where [jcr:uuid] = 1 or [x] = 2 option(traversal fail)"));
+        // first one does, second one does not
+        assertFalse(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] where [x] = 2 or [jcr:uuid] = 1 option(traversal fail)"));
+        
+        // queries that possibly use traversal (depending on the join order)
+        assertTrue(isValidQuery(qm, "xpath",
+                "/jcr:root/content//*/jcr:content[@jcr:uuid='1'] option(traversal fail)"));
+        assertTrue(isValidQuery(qm, "xpath",
+                "/jcr:root/content/*/jcr:content[@jcr:uuid='1'] option(traversal fail)"));
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] as [a] inner join [nt:base] as [b] on ischildnode(b, a) " + 
+                "where [a].[jcr:uuid] = 1 option(traversal fail)"));
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] as [a] inner join [nt:base] as [b] on ischildnode(a, b) " + 
+                "where [a].[jcr:uuid] = 1 option(traversal fail)"));
+
+        // union with joins
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] as [a] inner join [nt:base] as [b] on ischildnode(a, b) " + 
+                "where ischildnode([a], '/') or [a].[jcr:uuid] = 1 option(traversal fail)"));
+
+        assertFalse(isValidQuery(qm, "xpath",
+                "//*[@test] option(traversal fail)"));
+        assertFalse(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] option(traversal fail)"));
+        assertTrue(isValidQuery(qm, "xpath",
+                "//*[@test] option(traversal ok)"));
+        assertTrue(isValidQuery(qm, "xpath",
+                "//*[@test] option(traversal warn)"));
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] option(traversal ok)"));
+        assertTrue(isValidQuery(qm, Query.JCR_SQL2,
+                "select * from [nt:base] option(traversal warn)"));
+        
+        // the following is not really traversal, it is just listing child nodes:
+        assertTrue(isValidQuery(qm, "xpath",
+                "/jcr:root/*[@test] option(traversal fail)"));
+        // the following is not really traversal; it is just one node:
+        assertTrue(isValidQuery(qm, "xpath",
+                "/jcr:root/oak:index[@test] option(traversal fail)"));
+
+    }
+    
+    private static boolean isValidQuery(QueryManager qm, String language, String query) throws RepositoryException {
+        try {
+            qm.createQuery(query, language).execute();
+            return true;
+        } catch (InvalidQueryException e) {
+            assertTrue(e.toString(), e.toString().indexOf("query without index") >= 0);
+            return false;
+        }
+    }
+    
+    @Test
+    public void firstSelector() throws Exception {
+        Session session = getAdminSession();
+        Node root = session.getRootNode();
+        Node a = root.addNode("a");
+        a.setProperty("test", true);
+        Node b = a.addNode("b");
+        b.setProperty("test", true);
+        session.save();
+        QueryResult r = session.getWorkspace().getQueryManager()
+                .createQuery("//a[@test]/b[@test]", "xpath").execute();
+        String firstSelector = r.getSelectorNames()[0];
+        RowIterator rows = r.getRows();
+        Row row = rows.nextRow();
+        String path = row.getPath(firstSelector);
+        assertEquals("/a/b", path);
+    }
 
     @Test
     public void join() throws Exception {
@@ -764,8 +850,26 @@ public class QueryTest extends AbstractRepositoryTest {
     @Test
     public void approxCount() throws Exception {
         Session session = createAdminSession();
-        double c = getCost(session, "//*[@x=1]");
+        session.getNode("/oak:index/counter").setProperty("resolution", 100);
+        session.save();
         // *with* the counter index, the estimated cost to traverse is low
+        // but the counter index is not always up to date, so we need a loop
+        for (int i = 0; i < 100; i++) {
+            double c = getCost(session, "//*[@x=1]");
+            if (c > 0 && c < 100000) {
+                break;
+            }
+            // create a few nodes, in case there are not enough nodes
+            // for the node counter index to be available
+            Node testNode = session.getRootNode().addNode("test" + i);
+            for (int j = 0; j < 100; j++) {
+                testNode.addNode("n" + j);
+            }
+            session.save();
+            // wait for async indexing (the node counter index is async)
+            Thread.sleep(100);
+        }
+        double c = getCost(session, "//*[@x=1]");
         assertTrue("cost: " + c, c > 0 && c < 100000);
         
         // *without* the counter index, the estimated cost to traverse is high
@@ -781,18 +885,37 @@ public class QueryTest extends AbstractRepositoryTest {
     public void nodeType() throws Exception {
         Session session = createAdminSession();
         String xpath = "/jcr:root//element(*,rep:User)[xyz/@jcr:primaryType]";
-        assertTrue(getPlan(session, xpath).startsWith("[rep:User] as [a] /* nodeType"));
+        assertPlan(getPlan(session, xpath), "[rep:User] as [a] /* nodeType");
         
         session.getNode("/oak:index/nodetype").setProperty("declaringNodeTypes", 
                 new String[]{"oak:Unstructured"}, PropertyType.NAME);
         session.save();
 
-        assertTrue(getPlan(session, xpath).startsWith("[rep:User] as [a] /* traverse "));
+        assertPlan(getPlan(session, xpath), "[rep:User] as [a] /* traverse ");
 
-        xpath = "/jcr:root//element(*,oak:Unstructured)[xyz/@jcr:primaryType]";
-        assertTrue(getPlan(session, xpath).startsWith("[oak:Unstructured] as [a] /* nodeType "));
+        xpath = "/jcr:root//element(*,oak:Unstructured)[xyz/@jcr:primaryType] option(traversal fail)";
+        // the plan might still use traversal, so we can't just check the plan;
+        // but using "option(traversal fail)" we have ensured that there is an index
+        // (the nodetype index) that can serve this query
+        getPlan(session, xpath);
 
+        // and without the node type index, it is supposed to fail
+        Node nodeTypeIndex = session.getRootNode().getNode("oak:index").getNode("nodetype");
+        nodeTypeIndex.setProperty("declaringNodeTypes", new String[] {
+            }, PropertyType.NAME);
+        session.save();
+        try {
+            getPlan(session, xpath);
+            fail();
+        } catch (InvalidQueryException e) {
+            // expected
+        }
+        
         session.logout();
+    }
+
+    private static void assertPlan(String plan, String planPrefix) {
+        assertTrue("Unexpected plan: " + plan, plan.startsWith(planPrefix));
     }
     
     private static String getPlan(Session session, String xpath) throws RepositoryException {

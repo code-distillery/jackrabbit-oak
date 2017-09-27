@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>1.6-SNAPSHOT</version>
+    <version>1.8-SNAPSHOT</version>
     <relativePath>oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -38,18 +38,30 @@
   <modules>
     <module>oak-parent</module>
     <module>oak-commons</module>
+    <module>oak-api</module>
+    <module>oak-core-spi</module>
+    <module>oak-store-spi</module>
+    <module>oak-query-spi</module>
+    <module>oak-security-spi</module>
+    <module>oak-store-composite</module>
+    <module>oak-store-document</module>
+
+    <module>oak-blob-plugins</module>
     <module>oak-blob</module>
     <module>oak-blob-cloud</module>
+    <module>oak-blob-cloud-azure</module>
     <module>oak-core</module>
     <module>oak-jcr</module>
+
     <module>oak-upgrade</module>
     <module>oak-http</module>
     <module>oak-lucene</module>
     <module>oak-solr-core</module>
     <module>oak-solr-osgi</module>
+    <module>oak-search-mt</module>
     <module>oak-auth-external</module>
     <module>oak-auth-ldap</module>
-    <module>oak-tarmk-standby</module>
+    <module>oak-run-commons</module>
     <module>oak-run</module>
     <module>oak-it-osgi</module>
     <module>oak-pojosr</module>
@@ -58,7 +70,8 @@
     <module>oak-exercise</module>
     <module>oak-examples</module>
     <module>oak-it</module>
-    <module>oak-segment</module>
+    <module>oak-segment-tar</module>
+    <module>oak-benchmarks</module>
   </modules>
 
   <scm>
@@ -82,6 +95,8 @@
             <exclude>oak-doc/.*/**</exclude>
             <exclude>oak-doc/*.iml</exclude>
             <exclude>oak-doc/target/**</exclude>
+            <exclude>oak-segment-tar/target/**</exclude>
+            <exclude>oak-segment-tar/*.iml</exclude>
           </excludes>
         </configuration>
       </plugin>
@@ -93,7 +108,7 @@
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>findbugs-maven-plugin</artifactId>
-        <version>2.4.0</version>
+        <version>${findbugs.version}</version>
       </plugin>
     </plugins>
   </reporting>

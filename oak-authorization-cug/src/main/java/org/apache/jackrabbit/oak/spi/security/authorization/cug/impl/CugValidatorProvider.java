@@ -22,7 +22,7 @@ import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
-import org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants;
+import org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypePredicate;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.DefaultValidator;
@@ -71,7 +71,7 @@ class CugValidatorProvider extends ValidatorProvider implements CugConstants {
         private final String parentName;
         private final boolean isNodetypeTree;
 
-        private CugValidator(@Nonnull String parentName, @Nonnull NodeState parentAfter, @Nonnull boolean isNodetypeTree) {
+        private CugValidator(@Nonnull String parentName, @Nonnull NodeState parentAfter, boolean isNodetypeTree) {
             this.parentAfter = parentAfter;
             this.parentName = parentName;
             this.isNodetypeTree = isNodetypeTree;

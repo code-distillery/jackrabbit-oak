@@ -50,6 +50,9 @@ public final class RootFactory {
         return ImmutableRoot.getInstance(root);
     }
 
+    /**
+     * @deprecated with Oak 1.7.2 due to the usage of deprecated {@link QueryEngineSettings}
+     */
     @Nonnull
     public static Root createSystemRoot(@Nonnull NodeStore store,
                                         @Nullable CommitHook hook,
@@ -57,11 +60,25 @@ public final class RootFactory {
                                         @Nullable SecurityProvider securityProvider,
                                         @Nullable QueryEngineSettings queryEngineSettings,
                                         @Nullable QueryIndexProvider indexProvider) {
-        return new SystemRoot(store,
+        return SystemRoot.create(store,
                 (hook == null) ? EmptyHook.INSTANCE : hook,
                 (workspaceName == null) ? Oak.DEFAULT_WORKSPACE_NAME : workspaceName,
                 (securityProvider == null) ? new OpenSecurityProvider() : securityProvider,
-                (queryEngineSettings == null) ? new QueryEngineSettings() : queryEngineSettings,
+                queryEngineSettings,
+                (indexProvider == null) ? new CompositeQueryIndexProvider(): indexProvider);
+
+    }
+
+    @Nonnull
+    public static Root createSystemRoot(@Nonnull NodeStore store,
+                                        @Nullable CommitHook hook,
+                                        @Nullable String workspaceName,
+                                        @Nullable SecurityProvider securityProvider,
+                                        @Nullable QueryIndexProvider indexProvider) {
+        return SystemRoot.create(store,
+                (hook == null) ? EmptyHook.INSTANCE : hook,
+                (workspaceName == null) ? Oak.DEFAULT_WORKSPACE_NAME : workspaceName,
+                (securityProvider == null) ? new OpenSecurityProvider() : securityProvider,
                 (indexProvider == null) ? new CompositeQueryIndexProvider(): indexProvider);
 
     }

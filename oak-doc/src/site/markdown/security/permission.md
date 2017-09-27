@@ -18,8 +18,8 @@
 Permissions
 --------------------------------------------------------------------------------
 
-<a href="jcr_api"/>
-### JCR API
+<a name="jcr_api"/>
+### JCR and Jackrabbit API
 
 While access control management is a optional feature, a JCR implementation is
 required to support the basic permission checking. The basic requirements for
@@ -33,6 +33,7 @@ The methods defined to check permissions:
 
 - `Session#hasPermission(String absPath, String actions)`
 - `Session#checkPermission(String absPath, String actions)`
+- `JackrabbitSession.hasPermission(String absPath, @Nonnull String... actions)` (since Jackrabbit API 2.11.0 and Oak 1.4)
 
 The actions are expected to be a comma separated list of any of the following string constants:
 
@@ -41,6 +42,19 @@ The actions are expected to be a comma separated list of any of the following st
 - `Session.ACTION_REMOVE`
 - `Session.ACTION_SET_PROPERTY`
 
+And defined by Jackrabbit API the following additional actions (since Jackrabbit API 2.11.0):
+
+- `JackrabbitSession.ACTION_ADD_PROPERTY`
+- `JackrabbitSession.ACTION_MODIFY_PROPERTY`
+- `JackrabbitSession.ACTION_REMOVE_PROPERTY`
+- `JackrabbitSession.ACTION_REMOVE_NODE`
+- `JackrabbitSession.ACTION_NODE_TYPE_MANAGEMENT`
+- `JackrabbitSession.ACTION_VERSIONING`
+- `JackrabbitSession.ACTION_LOCKING`
+- `JackrabbitSession.ACTION_READ_ACCESS_CONTROL`
+- `JackrabbitSession.ACTION_MODIFY_ACCESS_CONTROL`
+- `JackrabbitSession.ACTION_USER_MANAGEMENT`
+
 **Note**: As of Oak 1.0 the these methods also handle the names of the permissions
 defined by Oak (see `Permissions#getString(long permissions)`).
 
@@ -48,7 +62,7 @@ See also section [Permissions vs Privileges](permission/permissionsandprivileges
 a comparison of these permission checks and testing privileges on the `AccessControlManager`. 
 
 ##### Examples
-###### Test if session has permission to add a new node
+###### Test if session has permission to add a new node (JCR API)
 
 Important: `absPath` refers to the node to be created
 
@@ -58,7 +72,15 @@ Important: `absPath` refers to the node to be created
          session.save();
     }
 
-###### Test if session has permission to perform version operations
+###### Test if session has permission to perform version and lock operations (Jackrabbit API)
+
+    Node content = jrSession.getNode("/content");
+    if (jrSession.hasPermission("/content", JackrabbitSession.ACTION_VERSIONING, JackrabbitSession.ACTION_LOCKING))) {
+         content.checkin();
+         session.save();
+    }
+
+###### Test if session has permission to perform version operations (Oak SPI)
 
     Node content = session.getNode("/content");
     if (session.hasPermission("/content", Permissions.getString(Permissions.VERSION_MANAGEMENT))) {
@@ -66,7 +88,7 @@ Important: `absPath` refers to the node to be created
          session.save();
     }
 
-<a href="oak_permissions"/>
+<a name="oak_permissions"/>
 ### Oak Permissions
 
 #### General Notes
@@ -155,6 +177,50 @@ Not used in Oak 1.0:
 - regular properties: `Permissions.MODIFY_PROPERTY`
 - non-existing properties: `Permissions.ADD_PROPERTY`
 
+`ACTION_ADD_PROPERTY`:
+
+- access control content: `Permissions.MODIFY_ACCESS_CONTROL`
+- other properties: `Permissions.ADD_PROPERTY`
+
+`ACTION_MODIFY_PROPERTY`:
+
+- access control content: `Permissions.MODIFY_ACCESS_CONTROL`
+- other properties: `Permissions.MODIFY_PROPERTY`
+
+`ACTION_REMOVE_PROPERTY`:
+
+- access control content: `Permissions.MODIFY_ACCESS_CONTROL`
+- other properties: `Permissions.REMOVE_PROPERTY`
+
+`ACTION_REMOVE_NODE`:
+
+- access control content: `Permissions.MODIFY_ACCESS_CONTROL`
+- regular nodes: `Permissions.REMOVE_NODE`
+
+`ACTION_NODE_TYPE_MANAGEMENT`
+
+- `Permissions.NODE_TYPE_MANAGEMENT`
+
+`ACTION_VERSIONING`
+
+- `Permissions.VERSION_MANAGEMENT`
+
+`ACTION_LOCKING`
+
+- `Permissions.LOCK_MANAGEMENT`
+
+`ACTION_READ_ACCESS_CONTROL`
+
+- `Permissions.READ_ACCESS_CONTROL`
+
+`ACTION_MODIFY_ACCESS_CONTROL`
+
+- `Permissions.MODIFY_ACCESS_CONTROL`
+
+`ACTION_USER_MANAGEMENT`
+
+- `Permissions.USER_MANAGEMENT`
+
 
 #### Permissions for Different Operations
 
@@ -165,7 +231,7 @@ Not used in Oak 1.0:
     for nodes and properties. Granting the `jcr:read` privilege will result in a backwards compatible
     read access for nodes and their properties, while specifying `rep:readNodes` or
     `rep:readProperties` privileges allows to grant or deny access to
-    nodes and properties (see also [Privilege Management](../privilege.html) for changes
+    nodes and properties (see also [Privilege Management](privilege.html) for changes
     in the privilege definitions).
     Together with the restrictions this new behavior now allows to individually grant/deny
     access to properties that match a given name/path/nodetype (and as a possible extension even property value).
@@ -229,6 +295,21 @@ regular JCR write permissions. This affects:
     permission `USER_MANAGEMENT` to be granted for the editing subject. This permission (including a corresponding privilege)
     has been introduced with Oak 1.0. See below for configuration parameters to obtain backwards compatible behavior.
 
+##### Observation
+
+Permission evaluation is also applied when delivering observation events
+respecting the effective permission setup of the `Session` that registered
+the `EventListener`.
+
+However, it is important to understand that events are only delivered once
+the modifications have been successfully persisted and permissions will
+be evaluated against the persisted state.
+
+In other words: Changing the permission setup along with the modifications 
+to be reported to the `EventListener` will result in events being included
+or excluded according to the modified permissions. See [OAK-4196] for an example.
+
+
 <a name="api_extensions"/>
 ### API Extensions
 
@@ -247,7 +328,7 @@ defines the following interfaces and classes:
 - [Permissions]: The permissions defined, respected and evaluated by the repository.
 - [PermissionConstants]: Constants used throughout the permission evaluation.
 
-<a href="default_implementation"/>
+<a name="default_implementation"/>
 ### Characteristics of the Permission Evaluation
 
 As explained above permission evaluation is completely separated from the access
@@ -290,6 +371,7 @@ The supported configuration options of the default implementation are described 
 - [Differences wrt Jackrabbit 2.x](permission/differences.html)
 - [Permissions : The Default Implementation](permission/default.html)
 - [Permission Evaluation in Detail](permission/evaluation.html)
+- [Multiplexed PermissionStore](permission/multiplexing.html)
 - [Restriction Management](authorization/restriction.html)
 
 <!-- references -->
@@ -304,3 +386,4 @@ The supported configuration options of the default implementation are described 
 [OAK-444]: https://issues.apache.org/jira/browse/OAK-444
 [JCR-2963]: https://issues.apache.org/jira/browse/JCR-2963
 [OAK-1268]: https://issues.apache.org/jira/browse/OAK-1268
+[OAK-4196]: https://issues.apache.org/jira/browse/OAK-4196

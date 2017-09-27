@@ -14,9 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@Version("1.1.0")
-@Export(optional = "provide:=true")
+@Version("1.1.1")
 package org.apache.jackrabbit.oak.spi.security.user.action;
 
-import aQute.bnd.annotation.Version;
-import aQute.bnd.annotation.Export;
+import org.osgi.annotation.versioning.Version;

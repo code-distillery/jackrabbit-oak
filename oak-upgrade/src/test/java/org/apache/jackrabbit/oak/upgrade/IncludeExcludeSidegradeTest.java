@@ -16,6 +16,8 @@
  */
 package org.apache.jackrabbit.oak.upgrade;
 
+import static org.apache.jackrabbit.oak.segment.file.FileStoreBuilder.fileStoreBuilder;
+
 import java.io.File;
 import java.io.IOException;
 
@@ -25,8 +27,10 @@ import javax.jcr.Session;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.jcr.Jcr;
 import org.apache.jackrabbit.oak.jcr.repository.RepositoryImpl;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
-import org.apache.jackrabbit.oak.plugins.segment.file.FileStore;
+import org.apache.jackrabbit.oak.segment.SegmentNodeStore;
+import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
+import org.apache.jackrabbit.oak.segment.file.FileStore;
+import org.apache.jackrabbit.oak.segment.file.InvalidFileStoreVersionException;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.junit.Before;
 
@@ -38,8 +42,8 @@ public class IncludeExcludeSidegradeTest extends IncludeExcludeUpgradeTest {
             File directory = getTestDirectory();
             File source = new File(directory, "source");
             source.mkdirs();
-            FileStore fileStore = FileStore.builder(source).build();
-            SegmentNodeStore segmentNodeStore = SegmentNodeStore.builder(fileStore).build();
+            FileStore fileStore = fileStoreBuilder(source).build();
+            SegmentNodeStore segmentNodeStore = SegmentNodeStoreBuilders.builder(fileStore).build();
             RepositoryImpl repository = (RepositoryImpl) new Jcr(new Oak(segmentNodeStore)).createRepository();
             Session session = repository.login(CREDENTIALS);
             try {
@@ -58,19 +62,31 @@ public class IncludeExcludeSidegradeTest extends IncludeExcludeUpgradeTest {
 
     @Override
     protected void doUpgradeRepository(File source, NodeStore target) throws RepositoryException, IOException {
-        FileStore fileStore = FileStore.builder(source).build();
-        SegmentNodeStore segmentNodeStore = SegmentNodeStore.builder(fileStore).build();
+        FileStore fileStore;
+        try {
+            fileStore = fileStoreBuilder(source).build();
+        } catch (InvalidFileStoreVersionException e) {
+            throw new IllegalStateException(e);
+        }
+        SegmentNodeStore segmentNodeStore = SegmentNodeStoreBuilders.builder(fileStore).build();
         try {
             final RepositorySidegrade sidegrade = new RepositorySidegrade(segmentNodeStore, target);
             sidegrade.setIncludes(
                     "/content/foo/en",
-                    "/content/assets/foo"
+                    "/content/assets/foo",
+                    "/content/other"
             );
             sidegrade.setExcludes(
                     "/content/assets/foo/2013",
                     "/content/assets/foo/2012",
                     "/content/assets/foo/2011",
                     "/content/assets/foo/2010"
+            );
+            sidegrade.setExcludeFragments(
+                    "oak-mount-libs-xyz"
+            );
+            sidegrade.setFragmentPaths(
+                    "/content/other/path"
             );
             sidegrade.copy();
         } finally {

@@ -32,7 +32,10 @@ import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.identifier.IdentifierManager;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeFactory;
+import org.apache.jackrabbit.oak.spi.state.NodeState;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
+import org.apache.jackrabbit.oak.spi.version.VersionConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -250,8 +253,8 @@ public abstract class ReadOnlyVersionManager {
      * versionable path property for the specified workspace is missing or if
      * the given tree is not located within the tree structure defined by a version history.
      *
-     * @see {@link VersionablePathHook}
-     * @see {@link VersionConstants#MIX_REP_VERSIONABLE_PATHS}
+     * @see VersionablePathHook
+     * @see VersionConstants#MIX_REP_VERSIONABLE_PATHS
      */
     @CheckForNull
     public Tree getVersionable(@Nonnull Tree versionTree, @Nonnull String workspaceName) {
@@ -323,5 +326,19 @@ public abstract class ReadOnlyVersionManager {
     protected boolean isVersionable(@Nonnull Tree tree) {
         return getNodeTypeManager().isNodeType(
                 checkNotNull(tree), VersionConstants.MIX_VERSIONABLE);
+    }
+
+    /**
+     * Returns {@code true} if the given {@code versionableCandidate} is of type
+     * {@code mix:versionable}; {@code false} otherwise.
+     *
+     * @param versionableCandidate node state to check.
+     * @return whether the {@code versionableCandidate} is versionable.
+     */
+    boolean isVersionable(NodeState versionableCandidate) {
+        // this is not 100% correct, because t.getPath() will
+        // not return the correct path for node after, but is
+        // sufficient to check if it is versionable
+        return isVersionable(TreeFactory.createReadOnlyTree(versionableCandidate));
     }
 }

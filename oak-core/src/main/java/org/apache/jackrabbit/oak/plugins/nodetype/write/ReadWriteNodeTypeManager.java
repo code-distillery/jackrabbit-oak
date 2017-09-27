@@ -17,8 +17,8 @@
 package org.apache.jackrabbit.oak.plugins.nodetype.write;
 
 import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
+import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
+import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.NODE_TYPES_PATH;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -53,7 +53,7 @@ import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
  * Calling any of the above methods will result in a {@link #refresh()} callback
  * to e.g. inform an associated session that it should refresh to make the
  * changes visible.
- * </p>
+ * <p>
  * Subclass responsibility is to provide an implementation of
  * {@link #getTypes()} for read only access to the tree where node types are
  * stored in content and {@link #getWriteRoot()} for write access to the

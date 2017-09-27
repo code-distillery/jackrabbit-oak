@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 
+import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.RepositoryException;
@@ -33,17 +34,19 @@ import com.google.common.base.Strings;
 import com.google.common.collect.Iterators;
 
 import org.apache.jackrabbit.api.security.user.Authorizable;
+import org.apache.jackrabbit.api.security.user.Group;
 import org.apache.jackrabbit.api.security.user.Query;
 import org.apache.jackrabbit.api.security.user.QueryBuilder;
-import org.apache.jackrabbit.api.security.user.UserManager;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.ResultRow;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.security.user.UserManagerImpl;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.oak.spi.security.user.AuthorizableType;
+import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
 import org.apache.jackrabbit.util.ISO9075;
 import org.apache.jackrabbit.util.Text;
 import org.slf4j.Logger;
@@ -56,13 +59,15 @@ public class UserQueryManager {
 
     private static final Logger log = LoggerFactory.getLogger(UserQueryManager.class);
 
-    private final UserManager userManager;
+    private final UserManagerImpl userManager;
     private final NamePathMapper namePathMapper;
     private final ConfigurationParameters config;
     private final Root root;
 
-    public UserQueryManager(UserManager userManager, NamePathMapper namePathMapper,
-                            ConfigurationParameters config, Root root) {
+    public UserQueryManager(@Nonnull UserManagerImpl userManager,
+                            @Nonnull NamePathMapper namePathMapper,
+                            @Nonnull ConfigurationParameters config,
+                            @Nonnull Root root) {
         this.userManager = userManager;
         this.namePathMapper = namePathMapper;
         this.config = config;
@@ -77,7 +82,7 @@ public class UserQueryManager {
      * @throws RepositoryException If an error occurs.
      */
     @Nonnull
-    public Iterator<Authorizable> findAuthorizables(Query query) throws RepositoryException {
+    public Iterator<Authorizable> findAuthorizables(@Nonnull Query query) throws RepositoryException {
         XPathQueryBuilder builder = new XPathQueryBuilder();
         query.build(builder);
 
@@ -86,38 +91,25 @@ public class UserQueryManager {
         }
 
         String statement = buildXPathStatement(builder);
-
         final String groupId = builder.getGroupID();
-        if (groupId == null || EveryonePrincipal.NAME.equals(groupId)) {
+        if (groupId == null || isEveryone(groupId)) {
             long offset = builder.getOffset();
-            Value bound = builder.getBound();
-
-            if (bound != null && offset > 0) {
-                log.warn("Found bound {} and offset {} in limit. Discarding offset.", builder.getBound(), offset);
-                offset = 0;
-            }
             Iterator<Authorizable> result = findAuthorizables(statement, builder.getMaxCount(), offset, null);
             if (groupId == null) {
                 return result;
             } else {
-                return Iterators.filter(result, new Predicate<Authorizable>() {
-                    @Override
-                    public boolean apply(@Nullable Authorizable authorizable) {
-                        try {
-                            return authorizable != null && !groupId.equals(authorizable.getID());
-                        } catch (RepositoryException e) {
-                            return false;
-                        }
+                return Iterators.filter(result, authorizable -> {
+                    try {
+                        return authorizable != null && !groupId.equals(authorizable.getID());
+                    } catch (RepositoryException e) {
+                        return false;
                     }
                 });
             }
         } else {
-            // filtering by group name included in query -> enforce offset
-            // and limit on the result set.
+            // filtering by group name included in query -> enforce offset and limit on the result set.
             Iterator<Authorizable> result = findAuthorizables(statement, Long.MAX_VALUE, 0, null);
-            Predicate groupFilter = new GroupPredicate(userManager,
-                    groupId,
-                    builder.isDeclaredMembersOnly());
+            Predicate<Authorizable> groupFilter = new GroupPredicate(userManager, groupId, builder.isDeclaredMembersOnly());
             return ResultIterator.create(builder.getOffset(), builder.getMaxCount(),
                     Iterators.filter(result, groupFilter));
         }
@@ -185,28 +177,17 @@ public class UserQueryManager {
             stmt.append(searchRoot);
         }
 
-        String propName;
+        String propName = Text.getName(relPath);
         String path;
         String ntName;
-        if (relPath.indexOf('/') == -1) {
-            // search for properties somewhere in the authorizable tree
-            propName = relPath;
+        if (relPath.indexOf('/') == -1 && !isReserved(propName)) {
+            // arbitrary property specified in query and no explicit relative path specified
+            // -> need to search within the whole in the authorizable tree
             path = null;
             ntName = null;
         } else {
-            propName = Text.getName(relPath);
-            String[] segments = Text.explode(relPath, '/', false);
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < segments.length - 1; i++) {
-                if (!PathUtils.denotesCurrent(segments[i])) {
-                    if (i > 0) {
-                        sb.append('/');
-                    }
-                    sb.append(segments[i]);
-                }
-            }
-            path = Strings.emptyToNull(sb.toString());
-            ntName = namePathMapper.getJcrName(QueryUtil.getNodeTypeName(type));
+            path = getQueryPath(relPath);
+            ntName = (path == null) ? namePathMapper.getJcrName(QueryUtil.getNodeTypeName(type)) : null;
         }
 
         stmt.append("//");
@@ -260,13 +241,13 @@ public class UserQueryManager {
         }
 
         StringBuilder statement = new StringBuilder();
-        ConditionVisitor visitor = new XPathConditionVisitor(statement, namePathMapper, userManager);
-
+ 
         String searchRoot = namePathMapper.getJcrPath(QueryUtil.getSearchRoot(builder.getSelectorType(), config));
         String ntName = namePathMapper.getJcrName(QueryUtil.getNodeTypeName(builder.getSelectorType()));
         statement.append(searchRoot).append("//element(*,").append(ntName).append(')');
 
         if (condition != null) {
+            ConditionVisitor visitor = new XPathConditionVisitor(statement, namePathMapper, userManager);
             statement.append('[');
             condition.accept(visitor);
             statement.append(']');
@@ -304,20 +285,55 @@ public class UserQueryManager {
         }
     }
 
+    @CheckForNull
+    private static String getQueryPath(@Nonnull String relPath) {
+        if (relPath.indexOf('/') == -1) {
+            // just a single segment -> don't include the path in the query
+            return null;
+        } else {
+            // compute the relative path excluding the trailing property name
+            String[] segments = Text.explode(relPath, '/', false);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < segments.length - 1; i++) {
+                if (!PathUtils.denotesCurrent(segments[i])) {
+                    if (i > 0) {
+                        sb.append('/');
+                    }
+                    sb.append(segments[i]);
+                }
+            }
+            return Strings.emptyToNull(sb.toString());
+        }
+    }
+
+    @CheckForNull
+    private static boolean isReserved(@Nonnull String propName) {
+        return UserConstants.GROUP_PROPERTY_NAMES.contains(propName) || UserConstants.USER_PROPERTY_NAMES.contains(propName);
+    }
+
+    private boolean isEveryone(@Nonnull String groupId) throws RepositoryException {
+        Group gr = userManager.getAuthorizable(groupId, Group.class);
+        if (gr == null) {
+            // compatibility with original code that didn't check for existence of the group
+            return EveryonePrincipal.NAME.equals(groupId);
+        } else {
+            return EveryonePrincipal.NAME.equals(gr.getPrincipal().getName());
+        }
+    }
+
     /**
      * Predicate asserting that a given user/group is only included once in the
      * result set.
      */
     private static final class UniqueResultPredicate implements Predicate<Authorizable> {
 
-        private final Set<String> authorizableIds = new HashSet<String>();
+        private final Set<String> authorizableIds = new HashSet();
 
         @Override
         public boolean apply(@Nullable Authorizable input) {
             try {
-                if (input != null && !authorizableIds.contains(input.getID())) {
-                    authorizableIds.add(input.getID());
-                    return true;
+                if (input != null) {
+                    return authorizableIds.add(input.getID());
                 }
             } catch (RepositoryException e) {
                 log.debug("Failed to retrieve authorizable ID " + e.getMessage());

@@ -33,7 +33,7 @@ import org.apache.jackrabbit.oak.jcr.delegate.SessionDelegate;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.version.ReadOnlyVersionManager;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.apache.jackrabbit.util.ISO8601;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -251,7 +251,7 @@ public class ReadWriteVersionManager extends ReadOnlyVersionManager {
     private Tree getExistingBaseVersion(@Nonnull Tree versionableTree) throws RepositoryException {
         Tree baseVersion = getBaseVersion(versionableTree);
         if (baseVersion == null) {
-            throw new IllegalStateException("Base version does not exist.");
+            throw new IllegalStateException("Base version does not exist for " + versionableTree.getPath());
         }
         return baseVersion;
     }

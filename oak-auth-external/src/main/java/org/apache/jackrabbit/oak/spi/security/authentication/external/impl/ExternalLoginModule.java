@@ -24,6 +24,7 @@ import java.util.Set;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.jcr.Credentials;
+import javax.jcr.RepositoryException;
 import javax.security.auth.Subject;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.login.LoginException;
@@ -34,7 +35,7 @@ import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.commons.DebugTimer;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
-import org.apache.jackrabbit.oak.plugins.value.ValueFactoryImpl;
+import org.apache.jackrabbit.oak.plugins.value.jcr.ValueFactoryImpl;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.authentication.AbstractLoginModule;
 import org.apache.jackrabbit.oak.spi.security.authentication.AuthInfoImpl;
@@ -51,6 +52,7 @@ import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncContex
 import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncException;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncHandler;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncManager;
+import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncResult;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncedIdentity;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
@@ -70,12 +72,12 @@ public class ExternalLoginModule extends AbstractLoginModule {
     /**
      * Name of the parameter that configures the name of the external identity provider.
      */
-    public static final String PARAM_IDP_NAME = "idp.name";
+    public static final String PARAM_IDP_NAME = SyncHandlerMapping.PARAM_IDP_NAME;
 
     /**
      * Name of the parameter that configures the name of the synchronization handler.
      */
-    public static final String PARAM_SYNC_HANDLER_NAME = "sync.handlerName";
+    public static final String PARAM_SYNC_HANDLER_NAME = SyncHandlerMapping.PARAM_SYNC_HANDLER_NAME;
 
     private ExternalIdentityProviderManager idpManager;
 
@@ -199,31 +201,20 @@ public class ExternalLoginModule extends AbstractLoginModule {
         // remember identification for log-output
         Object logId = (userId != null) ? userId : credentials;
         try {
-            SyncedIdentity sId = null;
-            UserManager userMgr = getUserManager();
-            if (userId != null && userMgr != null) {
-                sId = syncHandler.findIdentity(userMgr, userId);
-                // if there exists an authorizable with the given userid but is
-                // not an external one or if it belongs to another IDP, we just ignore it.
-                if (sId != null) {
-                    ExternalIdentityRef externalIdRef = sId.getExternalIdRef();
-                    if (externalIdRef == null) {
-                        log.debug("ignoring local user: {}", sId.getId());
-                        return false;
-                    } else if (!idp.getName().equals(externalIdRef.getProviderName())) {
-                        if (log.isDebugEnabled()) {
-                            log.debug("ignoring foreign identity: {} (idp={})", externalIdRef.getString(), idp.getName());
-                        }
-                        return false;
-                    }
-                }
+            // check if there exists a user with the given ID that has been synchronized
+            // before into the repository.
+            SyncedIdentity sId = getSyncedIdentity(userId);
+
+            // if there exists an authorizable with the given userid (syncedIdentity != null),
+            // ignore it if any of the following conditions is met:
+            // - identity is local (i.e. not an external identity)
+            // - identity belongs to another IDP
+            // - identity is valid but we have a preAuthLogin and the user doesn't need an updating sync (OAK-3508)
+            if (ignore(sId, preAuthLogin)) {
+                return false;
             }
 
             if (preAuthLogin != null) {
-                if (sId != null && !syncHandler.requiresSync(sId)) {
-                    log.debug("pre-authenticated external user {} does not require syncing.", sId);
-                    return false;
-                }
                 externalUser = idp.getUser(preAuthLogin.getUserId());
             } else {
                 externalUser = idp.authenticate(credentials);
@@ -244,9 +235,7 @@ public class ExternalLoginModule extends AbstractLoginModule {
 
                 return true;
             } else {
-                if (log.isDebugEnabled()) {
-                    log.debug("IDP {} returned null for {}", idp.getName(), logId);
-                }
+                debug("IDP {} returned null for {}", idp.getName(), logId.toString());
 
                 if (sId != null) {
                     // invalidate the user if it exists as synced variant
@@ -313,6 +302,35 @@ public class ExternalLoginModule extends AbstractLoginModule {
         }
     }
 
+    @CheckForNull
+    private SyncedIdentity getSyncedIdentity(@CheckForNull String userId) throws RepositoryException {
+        UserManager userMgr = getUserManager();
+        if (userId != null && userMgr != null) {
+            return syncHandler.findIdentity(userMgr, userId);
+        } else {
+            return null;
+        }
+    }
+
+    private boolean ignore(@CheckForNull SyncedIdentity syncedIdentity, @CheckForNull PreAuthenticatedLogin preAuthLogin) {
+        if (syncedIdentity != null) {
+            ExternalIdentityRef externalIdRef = syncedIdentity.getExternalIdRef();
+            if (externalIdRef == null) {
+                debug("ignoring local user: {}", syncedIdentity.getId());
+                return true;
+            } else if (!idp.getName().equals(externalIdRef.getProviderName())) {
+                debug("ignoring foreign identity: {} (idp={})", externalIdRef.getString(), idp.getName());
+                return true;
+            }
+
+            if (preAuthLogin != null && !syncHandler.requiresSync(syncedIdentity)) {
+                debug("pre-authenticated external user {} does not require syncing.", syncedIdentity.toString());
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Initiates synchronization of the external user.
      * @param user the external user
@@ -334,13 +352,13 @@ public class ExternalLoginModule extends AbstractLoginModule {
             try {
                 DebugTimer timer = new DebugTimer();
                 context = syncHandler.createContext(idp, userManager, new ValueFactoryImpl(root, NamePathMapper.DEFAULT));
-                context.sync(user);
+                SyncResult syncResult =  context.sync(user);
                 timer.mark("sync");
-                root.commit();
-                timer.mark("commit");
-                if (log.isDebugEnabled()) {
-                    log.debug("syncUser({}) {}", user.getId(), timer.getString());
+                if (root.hasPendingChanges()) {
+                    root.commit();
+                    timer.mark("commit");
                 }
+                debug("syncUser({}) {}, status: {}", user.getId(), timer.getString(), syncResult.getStatus().toString());
                 return;
             } catch (CommitFailedException e) {
                 log.warn("User synchronization failed during commit: {}. (attempt {}/{})", e.toString(), numAttempt, MAX_SYNC_ATTEMPTS);
@@ -375,9 +393,7 @@ public class ExternalLoginModule extends AbstractLoginModule {
             timer.mark("sync");
             root.commit();
             timer.mark("commit");
-            if (log.isDebugEnabled()) {
-                log.debug("validateUser({}) {}", id, timer.getString());
-            }
+            debug("validateUser({}) {}", id, timer.getString());
         } catch (CommitFailedException e) {
             throw new SyncException("User synchronization failed during commit.", e);
         } finally {
@@ -406,6 +422,12 @@ public class ExternalLoginModule extends AbstractLoginModule {
             attributes.putAll(credentialsSupport.getAttributes(creds));
         }
         return new AuthInfoImpl(userId, attributes, principals);
+    }
+
+    private static void debug(@Nonnull String msg, String... args) {
+        if (log.isDebugEnabled()) {
+            log.debug(msg, args);
+        }
     }
 
     //------------------------------------------------< AbstractLoginModule >---

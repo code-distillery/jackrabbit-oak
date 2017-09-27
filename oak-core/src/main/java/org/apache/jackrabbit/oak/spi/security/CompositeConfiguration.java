@@ -20,12 +20,15 @@ package org.apache.jackrabbit.oak.spi.security;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import org.osgi.annotation.versioning.ProviderType;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -37,6 +40,7 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.plugins.tree.TreeLocation;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
+import org.apache.jackrabbit.oak.spi.commit.ThreeWayConflictHandler;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.lifecycle.CompositeInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.CompositeWorkspaceInitializer;
@@ -49,6 +53,7 @@ import org.osgi.framework.Constants;
  * Abstract base implementation for {@link SecurityConfiguration}s that can
  * combine different implementations.
  */
+@ProviderType
 public abstract class CompositeConfiguration<T extends SecurityConfiguration> implements SecurityConfiguration {
 
     /**
@@ -65,6 +70,8 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
     private static final int NO_RANKING = Integer.MIN_VALUE;
 
     private final List<T> configurations = new CopyOnWriteArrayList<T>();
+
+    private final Ranking rankings = new Ranking();
 
     private final String name;
     private final CompositeContext ctx = new CompositeContext();
@@ -106,7 +113,7 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
         } else {
             int i = 0;
             for (T c : configurations) {
-                int r = c.getParameters().getConfigValue(PARAM_RANKING, NO_RANKING);
+                int r = rankings.get(c);
                 if (ranking > r) {
                     break;
                 } else {
@@ -115,11 +122,13 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
             }
             configurations.add(i, configuration);
         }
+        rankings.set(configuration, ranking);
         ctx.add(configuration);
     }
 
     public void removeConfiguration(@Nonnull T configuration) {
         configurations.remove(configuration);
+        rankings.remove(configuration);
         ctx.refresh(configurations);
     }
 
@@ -208,6 +217,12 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
 
     @Nonnull
     @Override
+    public List<ThreeWayConflictHandler> getConflictHandlers() {
+        return ImmutableList.copyOf(Iterables.concat(Lists.transform(getConfigurations(), securityConfiguration -> securityConfiguration.getConflictHandlers())));
+    }
+
+    @Nonnull
+    @Override
     public List<ProtectedItemImporter> getProtectedItemImporters() {
         return ImmutableList.copyOf(Iterables.concat(Lists.transform(getConfigurations(), new Function<T, List<? extends ProtectedItemImporter>>() {
             @Override
@@ -221,6 +236,30 @@ public abstract class CompositeConfiguration<T extends SecurityConfiguration> im
     @Override
     public Context getContext() {
         return ctx;
+    }
+
+    private static final class Ranking {
+
+        private Map<SecurityConfiguration, Integer> m = new ConcurrentHashMap();
+
+        private int get(@Nonnull SecurityConfiguration configuration) {
+            Integer ranking = m.get(configuration);
+            if (ranking == null) {
+                return NO_RANKING;
+            } else {
+                return ranking.intValue();
+            }
+        }
+
+        private void set(@Nonnull SecurityConfiguration configuration, int ranking) {
+            if (ranking != NO_RANKING) {
+                m.put(configuration, ranking);
+            }
+        }
+
+        private void remove(@Nonnull SecurityConfiguration configuration) {
+            m.remove(configuration);
+        }
     }
 
     private static final class CompositeContext implements Context {

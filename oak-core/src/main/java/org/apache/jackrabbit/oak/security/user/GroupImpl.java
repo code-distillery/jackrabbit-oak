@@ -20,7 +20,6 @@ import java.security.Principal;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.jcr.RepositoryException;
@@ -29,7 +28,6 @@ import javax.jcr.nodetype.ConstraintViolationException;
 import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.jackrabbit.api.security.user.Authorizable;
@@ -56,8 +54,8 @@ class GroupImpl extends AuthorizableImpl implements Group {
 
     //---------------------------------------------------< AuthorizableImpl >---
     @Override
-    void checkValidTree(Tree tree) throws RepositoryException {
-        if (tree == null || !UserUtil.isType(tree, AuthorizableType.GROUP)) {
+    void checkValidTree(@Nonnull Tree tree) throws RepositoryException {
+        if (!UserUtil.isType(tree, AuthorizableType.GROUP)) {
             throw new IllegalArgumentException("Invalid group node: node type rep:Group expected.");
         }
     }
@@ -113,7 +111,10 @@ class GroupImpl extends AuthorizableImpl implements Group {
                 log.debug(msg);
                 return false;
             }
-            // NOTE: detection of circular membership is postponed to the commit (=> UserValidator)
+            if (isCyclicMembership((Group) authorizable)) {
+                String msg = "Cyclic group membership detected for group " + getID() + " and member " + authorizable.getID();
+                throw new ConstraintViolationException(msg);
+            }
         }
 
         boolean success = getMembershipProvider().addMember(getTree(), authorizableImpl.getTree());
@@ -189,7 +190,7 @@ class GroupImpl extends AuthorizableImpl implements Group {
                     }
             );
         } else {
-            Iterator<String> oakPaths = getMembershipProvider().getMembers(getTree(), AuthorizableType.AUTHORIZABLE, includeInherited);
+            Iterator<String> oakPaths = getMembershipProvider().getMembers(getTree(), includeInherited);
             if (oakPaths.hasNext()) {
                 AuthorizableIterator iterator = AuthorizableIterator.create(oakPaths, userMgr, AuthorizableType.AUTHORIZABLE);
                 return new RangeIteratorAdapter(iterator, iterator.getSize());
@@ -244,19 +245,19 @@ class GroupImpl extends AuthorizableImpl implements Group {
      * @throws javax.jcr.RepositoryException If another error occurs.
      */
     private Set<String> updateMembers(boolean isRemove, @Nonnull String... memberIds) throws RepositoryException {
-        Set<String> idSet = Sets.newLinkedHashSet(Lists.newArrayList(memberIds));
+        Set<String> failedIds = Sets.newHashSet(memberIds);
         int importBehavior = UserUtil.getImportBehavior(getUserManager().getConfig());
 
         if (isEveryone()) {
             String msg = "Attempt to add or remove from everyone group.";
             log.debug(msg);
-            return idSet;
+            return failedIds;
         }
 
-        Map<String, String> updateMap = Maps.newHashMapWithExpectedSize(idSet.size());
-        Iterator<String> idIterator = idSet.iterator();
-        while (idIterator.hasNext()) {
-            String memberId = idIterator.next();
+        // calculate the contentID for each memberId and remember ids that cannot be processed
+        Map<String, String> updateMap = Maps.newHashMapWithExpectedSize(memberIds.length);
+        MembershipProvider mp = getMembershipProvider();
+        for (String memberId : memberIds) {
             if (Strings.isNullOrEmpty(memberId)) {
                 throw new ConstraintViolationException("MemberId must not be null or empty.");
             }
@@ -268,38 +269,51 @@ class GroupImpl extends AuthorizableImpl implements Group {
 
             if (ImportBehavior.BESTEFFORT != importBehavior) {
                 Authorizable member = getUserManager().getAuthorizable(memberId);
+                String msg = null;
                 if (member == null) {
+                    msg = "Attempt to add or remove a non-existing member '" + memberId + "' with ImportBehavior = " + ImportBehavior.nameFromValue(importBehavior);
+                } else if (member.isGroup()) {
+                    if (((AuthorizableImpl) member).isEveryone()) {
+                        log.debug("Attempt to add everyone group as member.");
+                        continue;
+                    } else if (isCyclicMembership((Group) member)) {
+                        msg = "Cyclic group membership detected for group " + getID() + " and member " + member.getID();
+                    }
+                }
+                if (msg != null) {
                     if (ImportBehavior.ABORT == importBehavior) {
-                        throw new ConstraintViolationException("Attempt to add or remove a non-existing member " + memberId);
-                    } else if (ImportBehavior.IGNORE == importBehavior) {
-                        String msg = "Attempt to add or remove non-existing member '" + getID() + "' with ImportBehavior = IGNORE.";
+                        throw new ConstraintViolationException(msg);
+                    } else {
+                        // ImportBehavior.IGNORE is default in UserUtil.getImportBehavior
                         log.debug(msg);
                         continue;
                     }
-                } else if (member.isGroup() && ((AuthorizableImpl) member).isEveryone()) {
-                    log.debug("Attempt to add everyone group as member.");
-                    continue;
                 }
             }
 
-            idIterator.remove();
-            updateMap.put(AuthorizableBaseProvider.getContentID(memberId), memberId);
+            // memberId can be processed -> remove from failedIds and generate contentID
+            failedIds.remove(memberId);
+            updateMap.put(mp.getContentID(memberId), memberId);
         }
 
         Set<String> processedIds = Sets.newHashSet(updateMap.values());
         if (!updateMap.isEmpty()) {
-            Set<String> failedIds;
+            Set<String> result;
             if (isRemove) {
-                failedIds = getMembershipProvider().removeMembers(getTree(), updateMap);
+                result = mp.removeMembers(getTree(), updateMap);
             } else {
-                failedIds = getMembershipProvider().addMembers(getTree(), updateMap);
+                result = mp.addMembers(getTree(), updateMap);
             }
-            idSet.addAll(failedIds);
-            processedIds.removeAll(failedIds);
+            failedIds.addAll(result);
+            processedIds.removeAll(result);
         }
 
-        getUserManager().onGroupUpdate(this, isRemove, false, processedIds, idSet);
-        return idSet;
+        getUserManager().onGroupUpdate(this, isRemove, false, processedIds, failedIds);
+        return failedIds;
+    }
+
+    private boolean isCyclicMembership(@Nonnull Group member) throws RepositoryException {
+        return member.isMember(this);
     }
 
     /**

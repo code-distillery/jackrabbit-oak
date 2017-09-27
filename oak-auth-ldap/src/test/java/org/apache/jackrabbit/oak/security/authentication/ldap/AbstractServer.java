@@ -20,10 +20,13 @@
 package org.apache.jackrabbit.oak.security.authentication.ldap;
 
 
+import static org.junit.Assume.assumeFalse;
+
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.BindException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -40,6 +43,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.directory.api.ldap.model.constants.SupportedSaslMechanisms;
 import org.apache.directory.api.ldap.model.entry.DefaultEntry;
 import org.apache.directory.api.ldap.model.entry.Entry;
+import org.apache.directory.api.ldap.model.exception.LdapConfigurationException;
 import org.apache.directory.api.ldap.model.exception.LdapException;
 import org.apache.directory.api.ldap.model.ldif.LdifEntry;
 import org.apache.directory.api.ldap.model.ldif.LdifReader;
@@ -93,6 +97,8 @@ public abstract class AbstractServer {
     protected boolean doDelete = true;
 
     protected int port = -1;
+
+    protected CacheService cacheService;
 
     protected DirectoryService directoryService;
 
@@ -192,12 +198,12 @@ public abstract class AbstractServer {
         directoryService.setShutdownHookEnabled(false);
         directoryService.setInstanceLayout(new InstanceLayout(cwd));
 
-        CacheService cache = new CacheService();
-        cache.initialize(directoryService.getInstanceLayout());
+        cacheService = new CacheService();
+        cacheService.initialize(directoryService.getInstanceLayout());
 
         SchemaManager schemaManager = new DefaultSchemaManager();
         directoryService.setSchemaManager(schemaManager);
-        directoryService.setDnFactory(new DefaultDnFactory(directoryService.getSchemaManager(), cache.getCache("dnCache")));
+        directoryService.setDnFactory(new DefaultDnFactory(directoryService.getSchemaManager(), cacheService.getCache("dnCache")));
 
         AvlPartition schLdifPart = new AvlPartition(directoryService.getSchemaManager(), directoryService.getDnFactory());
         schLdifPart.setId("schema");
@@ -215,7 +221,7 @@ public abstract class AbstractServer {
         AvlPartition examplePart = new AvlPartition(directoryService.getSchemaManager(), directoryService.getDnFactory());
         examplePart.setId("example");
         examplePart.setSuffixDn(directoryService.getDnFactory().create(EXAMPLE_DN));
-        examplePart.setCacheService(cache);
+        examplePart.setCacheService(cacheService);
         directoryService.addPartition(examplePart);
 
         // setup ldap server
@@ -226,8 +232,27 @@ public abstract class AbstractServer {
 
         directoryService.startup();
         setupExamplePartition();
-        ldapServer.start();
+        startLdapServer();
         setContexts(ServerDNConstants.ADMIN_SYSTEM_DN, "secret");
+    }
+
+    /**
+     * Start the LDAP server assuming we can bind to the previously reserved port.
+     * Given that there is a small race between when the port was reserved and when the
+     * socket is actually bound this can still fail. For now we are ignoring this rare
+     * case and skip the test. See OAK-5542.
+     * TODO: OAK-5832: Make the LDAP server used in testing resilient against ports already in use
+     * @throws Exception
+     */
+    private void startLdapServer() throws Exception {
+        try {
+            ldapServer.start();
+        } catch (LdapConfigurationException e) {
+            Throwable cause = e.getCause();
+            assumeFalse("Ignoring this test as the server port is already in use (OAK-5542): " + cause,
+                    cause instanceof BindException);
+            throw e;
+        }
     }
 
     protected void setupLdapServer() throws Exception {
@@ -360,11 +385,16 @@ public abstract class AbstractServer {
      * Sets the system context root to null.
      */
     protected void tearDown() throws Exception {
-        ldapServer.stop();
+        if (ldapServer != null) {
+            ldapServer.stop();
+        }
         try {
             directoryService.shutdown();
         } catch (Exception e) {
             // ignore
+        }
+        if (cacheService != null) {
+            cacheService.destroy();
         }
     }
 }

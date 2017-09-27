@@ -39,7 +39,6 @@ import org.apache.jackrabbit.oak.api.Result.SizePrecision;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
 import org.apache.jackrabbit.oak.commons.json.JsopWriter;
-import org.apache.jackrabbit.oak.plugins.index.aggregate.NodeAggregator;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.OakSolrConfigurationProvider;
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.SolrServerConfigurationProvider;
@@ -47,19 +46,18 @@ import org.apache.jackrabbit.oak.plugins.index.solr.configuration.nodestate.Node
 import org.apache.jackrabbit.oak.plugins.index.solr.configuration.nodestate.OakSolrNodeStateConfiguration;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.OakSolrServer;
 import org.apache.jackrabbit.oak.plugins.index.solr.server.SolrServerProvider;
-import org.apache.jackrabbit.oak.query.QueryEngineSettings;
-import org.apache.jackrabbit.oak.query.QueryImpl;
-import org.apache.jackrabbit.oak.query.fulltext.FullTextExpression;
-import org.apache.jackrabbit.oak.query.fulltext.FullTextTerm;
-import org.apache.jackrabbit.oak.query.fulltext.FullTextVisitor;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextExpression;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextTerm;
+import org.apache.jackrabbit.oak.spi.query.fulltext.FullTextVisitor;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
-import org.apache.jackrabbit.oak.spi.query.Cursors;
+import org.apache.jackrabbit.oak.plugins.index.Cursors;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.IndexRow;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
 import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.FulltextQueryIndex;
+import org.apache.jackrabbit.oak.spi.query.QueryLimits;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServer;
@@ -89,8 +87,6 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
     static final String NATIVE_LUCENE_QUERY = "native*lucene";
 
     private static double MIN_COST = 2.3;
-
-    private static double COST_FOR_SINGLE_RESTRICTION = 10;
 
     private final Logger log = LoggerFactory.getLogger(SolrQueryIndex.class);
 
@@ -227,7 +223,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
             AbstractIterator<SolrResultRow> iterator = getIterator(filter, plan, parent, parentDepth, configuration,
                     solrServer, estimator);
 
-            cursor = new SolrRowCursor(iterator, plan, filter.getQueryEngineSettings(), estimator, solrServer, configuration);
+            cursor = new SolrRowCursor(iterator, plan, filter.getQueryLimits(), estimator, solrServer, configuration);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -367,7 +363,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                                     for (Map.Entry<String, List<String>> entry : value.entrySet()) {
                                         // all highlighted values end up in 'rep:excerpt', regardless of field match
                                         for (String v : entry.getValue()) {
-                                            doc.addField(QueryImpl.REP_EXCERPT, v);
+                                            doc.addField(QueryConstants.REP_EXCERPT, v);
                                         }
                                     }
                                 }
@@ -535,10 +531,11 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
         } else return (!configuration.useForPropertyRestrictions() // Solr index not used for properties
                 || (configuration.getUsedProperties().size() > 0 && !configuration.getUsedProperties().contains(property.propertyName)) // not explicitly contained in the used properties
                 || property.propertyName.contains("/") // no child-level property restrictions
-                || QueryImpl.REP_EXCERPT.equals(property.propertyName) // rep:excerpt is not handled at the property level
-                || QueryImpl.OAK_SCORE_EXPLANATION.equals(property.propertyName) // score explain is not handled at the property level
-                || QueryImpl.REP_FACET.equals(property.propertyName) // rep:facet is not handled at the property level
+                || QueryConstants.REP_EXCERPT.equals(property.propertyName) // rep:excerpt is not handled at the property level
+                || QueryConstants.OAK_SCORE_EXPLANATION.equals(property.propertyName) // score explain is not handled at the property level
+                || QueryConstants.REP_FACET.equals(property.propertyName) // rep:facet is not handled at the property level
                 || QueryConstants.RESTRICTION_LOCAL_NAME.equals(property.propertyName)
+                || property.propertyName.startsWith(QueryConstants.FUNCTION_RESTRICTION_PREFIX)
                 || configuration.getIgnoredProperties().contains(property.propertyName));
     }
 
@@ -674,7 +671,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
 
         SolrResultRow currentRow;
 
-        SolrRowCursor(final Iterator<SolrResultRow> it, IndexPlan plan, QueryEngineSettings settings,
+        SolrRowCursor(final Iterator<SolrResultRow> it, IndexPlan plan, QueryLimits settings,
                       LMSEstimator estimator, SolrServer solrServer, OakSolrConfiguration configuration) {
             this.estimator = estimator;
             this.solrServer = solrServer;
@@ -738,11 +735,11 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                 @Override
                 public PropertyValue getValue(String columnName) {
                     // overlay the score
-                    if (QueryImpl.JCR_SCORE.equals(columnName)) {
+                    if (QueryConstants.JCR_SCORE.equals(columnName)) {
                         return PropertyValues.newDouble(currentRow.score);
                     }
-                    if (columnName.startsWith(QueryImpl.REP_FACET)) {
-                        String facetFieldName = columnName.substring(QueryImpl.REP_FACET.length() + 1, columnName.length() - 1);
+                    if (columnName.startsWith(QueryConstants.REP_FACET)) {
+                        String facetFieldName = columnName.substring(QueryConstants.REP_FACET.length() + 1, columnName.length() - 1);
                         FacetField facetField = null;
                         for (FacetField ff : currentRow.facetFields) {
                             if (ff.getName().equals(facetFieldName + "_facet")) {
@@ -762,7 +759,7 @@ public class SolrQueryIndex implements FulltextQueryIndex, QueryIndex.AdvanceFul
                             return null;
                         }
                     }
-                    if (QueryImpl.REP_SPELLCHECK.equals(columnName) || QueryImpl.REP_SUGGEST.equals(columnName)) {
+                    if (QueryConstants.REP_SPELLCHECK.equals(columnName) || QueryConstants.REP_SUGGEST.equals(columnName)) {
                         return PropertyValues.newString(currentRow.suggestion);
                     }
                     Collection<Object> fieldValues = currentRow.doc.getFieldValues(columnName);

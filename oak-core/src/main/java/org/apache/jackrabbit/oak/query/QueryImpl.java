@@ -20,6 +20,7 @@ import static org.apache.jackrabbit.oak.query.ast.AstElementFactory.copyElementA
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,18 +31,13 @@ import java.util.Set;
 
 import javax.annotation.Nonnull;
 
-import com.google.common.base.Strings;
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Ordering;
-
 import org.apache.jackrabbit.oak.api.PropertyValue;
-import org.apache.jackrabbit.oak.api.Tree;
-import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.api.Result.SizePrecision;
+import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.namepath.JcrPathParser;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
+import org.apache.jackrabbit.oak.query.QueryOptions.Traversal;
 import org.apache.jackrabbit.oak.query.ast.AndImpl;
 import org.apache.jackrabbit.oak.query.ast.AstVisitorBase;
 import org.apache.jackrabbit.oak.query.ast.BindVariableValueImpl;
@@ -84,8 +80,9 @@ import org.apache.jackrabbit.oak.query.index.FilterImpl;
 import org.apache.jackrabbit.oak.query.index.TraversingIndex;
 import org.apache.jackrabbit.oak.query.plan.ExecutionPlan;
 import org.apache.jackrabbit.oak.query.plan.SelectorExecutionPlan;
+import org.apache.jackrabbit.oak.query.stats.QueryStatsData.QueryExecutionStats;
 import org.apache.jackrabbit.oak.spi.query.Filter;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.spi.query.QueryConstants;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.AdvancedQueryIndex;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex.IndexPlan;
@@ -97,48 +94,26 @@ import org.apache.jackrabbit.oak.spi.state.NodeStateUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Strings;
+import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Ordering;
+
 /**
  * Represents a parsed query.
  */
 public class QueryImpl implements Query {
-    
-    /**
-     * The "jcr:path" pseudo-property.
-     */
-    // TODO jcr:path isn't an official feature, support it?
-    public static final String JCR_PATH = "jcr:path";
 
-    /**
-     * The "jcr:score" pseudo-property.
-     */
-    public static final String JCR_SCORE = "jcr:score";
-
-    /**
-     * The "rep:excerpt" pseudo-property.
-     */
-    public static final String REP_EXCERPT = "rep:excerpt";
-
-    /**
-     * The "rep:facet" pseudo-property.
-     */
-    public static final String REP_FACET = "rep:facet";
-
-    /**
-     * The "oak:explainScore" pseudo-property.
-     */
-    public static final String OAK_SCORE_EXPLANATION = "oak:scoreExplanation";
-
-    /**
-     * The "rep:spellcheck" pseudo-property.
-     */
-    public static final String REP_SPELLCHECK = "rep:spellcheck()";
-
-    /**
-     * The "rep:suggest" pseudo-property.
-     */
-    public static final String REP_SUGGEST = "rep:suggest()";
+    public static final UnsupportedOperationException TOO_MANY_UNION = 
+            new UnsupportedOperationException("Too many union queries");
+    public final static int MAX_UNION = Integer.getInteger("oak.sql2MaxUnion", 1000);
 
     private static final Logger LOG = LoggerFactory.getLogger(QueryImpl.class);
+    
+    private final QueryExecutionStats stats;
+
+    private boolean potentiallySlowTraversalQueryLogged;
 
     private static final Ordering<QueryIndex> MINIMAL_COST_ORDERING = new Ordering<QueryIndex>() {
         @Override
@@ -160,6 +135,11 @@ public class QueryImpl implements Query {
      * purposes.
      */
     private boolean traversalEnabled = true;
+    
+    /**
+     * The query option to be used for this query.
+     */
+    private QueryOptions queryOptions = new QueryOptions();
 
     private OrderingImpl[] orderings;
     private ColumnImpl[] columns;
@@ -195,14 +175,18 @@ public class QueryImpl implements Query {
 
     private boolean isInternal;
 
+    private boolean potentiallySlowTraversalQuery;
+
     QueryImpl(String statement, SourceImpl source, ConstraintImpl constraint,
-        ColumnImpl[] columns, NamePathMapper mapper, QueryEngineSettings settings) {
+        ColumnImpl[] columns, NamePathMapper mapper, QueryEngineSettings settings,
+        QueryExecutionStats stats) {
         this.statement = statement;
         this.source = source;
         this.constraint = constraint;
         this.columns = columns;
         this.namePathMapper = mapper;
         this.settings = settings;
+        this.stats = stats;
     }
 
     @Override
@@ -433,7 +417,7 @@ public class QueryImpl implements Query {
         for (int i = 0; i < columns.length; i++) {
             ColumnImpl c = columns[i];
             boolean distinct = true;
-            if (JCR_SCORE.equals(c.getPropertyName())) {
+            if (QueryConstants.JCR_SCORE.equals(c.getPropertyName())) {
                 distinct = false;
             }
             distinctColumns[i] = distinct;
@@ -636,6 +620,11 @@ public class QueryImpl implements Query {
         // use a greedy algorithm
         SourceImpl result = null;
         Set<SourceImpl> available = new HashSet<SourceImpl>();
+        // the query is only slow if all possible join orders are slow
+        // (in theory, due to using the greedy algorithm, a query might be considered
+        // slow even thought there is a plan that doesn't need to use traversal, but
+        // only for 3-way and higher joins, and only if traversal is considered very fast)
+        boolean isPotentiallySlowJoin = true;
         while (sources.size() > 0) {
             int bestIndex = 0;
             double bestCost = Double.POSITIVE_INFINITY;
@@ -655,12 +644,16 @@ public class QueryImpl implements Query {
                     bestIndex = i;
                     best = test;
                 }
+                if (!potentiallySlowTraversalQuery) {
+                    isPotentiallySlowJoin = false;
+                }
                 test.unprepare();
             }
             available.add(sources.remove(bestIndex));
             result = best;
             best.prepare(bestPlan);
         }
+        potentiallySlowTraversalQuery = isPotentiallySlowJoin;
         estimatedCost = result.prepare().getEstimatedCost();
         source = result;
         isSortedByIndex = canSortByIndex();
@@ -812,6 +805,8 @@ public class QueryImpl implements Query {
             if (end) {
                 return;
             }
+            long nanos = System.nanoTime();
+            long oldIndex = rowIndex;
             if (!started) {
                 source.execute(rootState);
                 started = true;
@@ -834,6 +829,8 @@ public class QueryImpl implements Query {
                     break;
                 }
             }
+            nanos = System.nanoTime() - nanos;
+            stats.read(rowIndex - oldIndex, rowIndex, nanos);
         }
 
         @Override
@@ -932,6 +929,9 @@ public class QueryImpl implements Query {
         for (int i = 0; i < list.length; i++) {
             list[i] = selectors.get(i).getSelectorName();
         }
+        // reverse names to that for xpath, 
+        // the first selector is the same as the node iterator
+        Collections.reverse(Arrays.asList(list));
         return list;
     }
 
@@ -943,6 +943,11 @@ public class QueryImpl implements Query {
     @Override
     public void setTraversalEnabled(boolean traversalEnabled) {
         this.traversalEnabled = traversalEnabled;
+    }
+
+    @Override
+    public void setQueryOptions(QueryOptions options) {
+        this.queryOptions = options;
     }
 
     public SelectorExecutionPlan getBestSelectorExecutionPlan(FilterImpl filter) {
@@ -965,6 +970,7 @@ public class QueryImpl implements Query {
         // current index is below the minimum cost of the next index.
         List<? extends QueryIndex> queryIndexes = MINIMAL_COST_ORDERING
                 .sortedCopy(indexProvider.getQueryIndexes(rootState));
+        List<OrderEntry> sortOrder = getSortOrder(filter); 
         for (int i = 0; i < queryIndexes.size(); i++) {
             QueryIndex index = queryIndexes.get(i);
             double minCost = index.getMinimumCost();
@@ -978,32 +984,6 @@ public class QueryImpl implements Query {
             IndexPlan indexPlan = null;
             if (index instanceof AdvancedQueryIndex) {
                 AdvancedQueryIndex advIndex = (AdvancedQueryIndex) index;
-                List<OrderEntry> sortOrder = null;
-                if (orderings != null) {
-                    sortOrder = new ArrayList<OrderEntry>();
-                    for (OrderingImpl o : orderings) {
-                        DynamicOperandImpl op = o.getOperand();
-                        if (!(op instanceof PropertyValueImpl)) {
-                            // ordered by a function: currently not supported
-                            break;
-                        }
-                        PropertyValueImpl p = (PropertyValueImpl) op;
-                        SelectorImpl s = p.getSelectors().iterator().next();
-                        if (!s.equals(filter.getSelector())) {
-                            // ordered by a different selector
-                            continue;
-                        }
-                        OrderEntry e = new OrderEntry(
-                                p.getPropertyName(), 
-                                Type.UNDEFINED, 
-                                o.isDescending() ? 
-                                OrderEntry.Order.DESCENDING : OrderEntry.Order.ASCENDING);
-                        sortOrder.add(e);
-                    }
-                    if (sortOrder.size() == 0) {
-                        sortOrder = null;
-                    }
-                }
                 long maxEntryCount = limit;
                 if (offset > 0) {
                     if (offset + limit < 0) {
@@ -1020,13 +1000,21 @@ public class QueryImpl implements Query {
                     // TODO limit is after all conditions
                     long entryCount = Math.min(maxEntryCount, p.getEstimatedEntryCount());
                     double c = p.getCostPerExecution() + entryCount * p.getCostPerEntry();
+
+                    if (LOG.isDebugEnabled()) {
+                        String plan = advIndex.getPlanDescription(p, rootState);
+                        String msg = String.format("cost for [%s] of type (%s) with plan [%s] is %1.2f", p.getPlanName(), indexName, plan, c);
+                        logDebug(msg);
+                    }
+
                     if (c < cost) {
                         cost = c;
-                        if (p.getPlanName() != null) {
-                            indexName += "[" + p.getPlanName() + "]";
-                        }
                         indexPlan = p;
                     }
+                }
+
+                if (indexPlan != null && indexPlan.getPlanName() != null) {
+                    indexName += "[" + indexPlan.getPlanName() + "]";
                 }
             } else {
                 cost = index.getCost(filter, rootState);
@@ -1043,9 +1031,9 @@ public class QueryImpl implements Query {
                 bestPlan = indexPlan;
             }
         }
-
+        potentiallySlowTraversalQuery = bestIndex == null;
         if (traversalEnabled) {
-            QueryIndex traversal = new TraversingIndex();
+            TraversingIndex traversal = new TraversingIndex();
             double cost = traversal.getCost(filter, rootState);
             if (LOG.isDebugEnabled()) {
                 logDebug("cost for " + traversal.getIndexName() + " is " + cost);
@@ -1054,9 +1042,71 @@ public class QueryImpl implements Query {
                 bestCost = cost;
                 bestPlan = null;
                 bestIndex = traversal;
+                if (potentiallySlowTraversalQuery) {
+                    potentiallySlowTraversalQuery = traversal.isPotentiallySlow(filter, rootState);
+                }
             }
         }
-        return new SelectorExecutionPlan(filter.getSelector(), bestIndex, bestPlan, bestCost);
+        return new SelectorExecutionPlan(filter.getSelector(), bestIndex, 
+                bestPlan, bestCost);
+    }
+
+    @Override
+    public boolean isPotentiallySlow() {
+        return potentiallySlowTraversalQuery;
+    }
+    
+    @Override
+    public void verifyNotPotentiallySlow() {
+        if (potentiallySlowTraversalQuery) {
+            QueryOptions.Traversal traversal = queryOptions.traversal;
+            if (traversal == Traversal.DEFAULT) {
+                // use the (configured) default
+                traversal = settings.getFailTraversal() ? Traversal.FAIL : Traversal.WARN;
+            } else {
+                // explicitly set in the query
+                traversal = queryOptions.traversal;
+            }
+            String message = "Traversal query (query without index): " + statement + "; consider creating an index";
+            switch (traversal) {
+            case DEFAULT:
+                // not possible (changed to either FAIL or WARN above)
+                throw new AssertionError();
+            case OK:
+                break;
+            case WARN:
+                if (!potentiallySlowTraversalQueryLogged) {
+                    LOG.warn(message);
+                    potentiallySlowTraversalQueryLogged = true;
+                }
+                break;
+            case FAIL:
+                if (!potentiallySlowTraversalQueryLogged) {
+                    LOG.warn(message);
+                    potentiallySlowTraversalQueryLogged = true;
+                }
+                throw new IllegalArgumentException(message);
+            }
+        }
+    }
+    
+    private List<OrderEntry> getSortOrder(FilterImpl filter) {
+        if (orderings == null) {
+            return null;
+        }
+        ArrayList<OrderEntry> sortOrder = new ArrayList<OrderEntry>();
+        for (OrderingImpl o : orderings) {
+            DynamicOperandImpl op = o.getOperand();
+            OrderEntry e = op.getOrderEntry(filter.getSelector(), o);
+            if (e == null) {
+                continue;
+            }
+            sortOrder.add(e);
+        }
+        if (sortOrder.size() == 0) {
+            return null;
+        }
+        return sortOrder;
     }
     
     private void logDebug(String msg) {
@@ -1200,7 +1250,13 @@ public class QueryImpl implements Query {
         Query result = this;
         
         if (constraint != null) {
-            Set<ConstraintImpl> unionList = constraint.convertToUnion();
+            Set<ConstraintImpl> unionList;
+            try {
+                unionList = constraint.convertToUnion();
+            } catch (UnsupportedOperationException e) {
+                // too many union
+                return this;
+            }
             if (unionList.size() > 1) {
                 // there are some cases where multiple ORs simplify into a single one. If we get a
                 // union list of just one we don't really have to UNION anything.
@@ -1290,7 +1346,8 @@ public class QueryImpl implements Query {
             this.constraint,
             cols.toArray(new ColumnImpl[0]),
             this.namePathMapper,
-            this.settings);
+            this.settings,
+            this.stats);
         copy.explain = this.explain;
         copy.distinct = this.distinct;
         
@@ -1312,4 +1369,12 @@ public class QueryImpl implements Query {
         return constraint.containsUnfilteredFullTextCondition();
     }
 
+    public QueryOptions getQueryOptions() {
+        return queryOptions;
+    }
+
+    public QueryExecutionStats getQueryExecutionStats() {
+        return stats;
+    }
+    
 }

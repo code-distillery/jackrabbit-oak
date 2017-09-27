@@ -87,6 +87,8 @@ public class DefaultSyncConfig {
 
         private String pathPrefix;
 
+        private boolean applyRFC7613UsernameCaseMapped;
+
         /**
          * Returns the duration in milliseconds until a synced authorizable gets expired. An expired authorizable will
          * be re-synced.
@@ -109,6 +111,27 @@ public class DefaultSyncConfig {
         }
 
         /**
+         * Returns true if new AuthorizableIDs will be normalized according to
+         * the UsernameCaseMapped profile defined in RFC7613
+         * @return true if new AuthorizableIDs will be normalized.
+         */
+        public boolean isApplyRFC7613UsernameCaseMapped() {
+            return applyRFC7613UsernameCaseMapped;
+        }
+
+        /**
+         * Set to true if new AuthorizableIDs shall be normalized according to
+         * the UsernameCaseMapped profile defined in RFC7613.
+         * @param applyRFC7613UsernameCaseMapped true if the UsernameCaseMapped profile shall be used for normalization.
+         * @return {@code this}
+         * @see #isApplyRFC7613UsernameCaseMapped()
+         */
+        public Authorizable setApplyRFC7613UsernameCaseMapped(boolean applyRFC7613UsernameCaseMapped) {
+            this.applyRFC7613UsernameCaseMapped = applyRFC7613UsernameCaseMapped;
+            return this;
+        }
+
+        /**
          * Defines the set of group names that are automatically added to synced authorizable.
          * @return set of group names.
          */
@@ -118,7 +141,9 @@ public class DefaultSyncConfig {
         }
 
         /**
-         * Sets the auto membership
+         * Sets the auto membership. Note that the passed group names will be trimmed
+         * and empty string values will be ignored (along with {@code null} values).
+         *
          * @param autoMembership the membership
          * @return {@code this}
          * @see #getAutoMembership()
@@ -127,7 +152,7 @@ public class DefaultSyncConfig {
         public Authorizable setAutoMembership(@Nonnull String ... autoMembership) {
             this.autoMembership = new HashSet<String>();
             for (String groupName: autoMembership) {
-                if (!groupName.trim().isEmpty()) {
+                if (groupName != null && !groupName.trim().isEmpty()) {
                     this.autoMembership.add(groupName.trim());
                 }
             }
@@ -140,14 +165,14 @@ public class DefaultSyncConfig {
          * paths. the intermediate nodes will be created accordingly.
          *
          * Example:
-         * <xmp>
+         * <pre>{@code
          *     {
          *         "rep:fullname": "cn",
          *         "country", "c",
          *         "profile/email": "mail",
          *         "profile/givenName": "cn"
          *     }
-         * </xmp>
+         * }</pre>
          *
          * The implicit properties like userid, groupname, password must not be mapped.
          *
@@ -202,6 +227,10 @@ public class DefaultSyncConfig {
 
         private long membershipNestingDepth;
 
+        private boolean dynamicMembership;
+
+        private boolean disableMissing;
+
         /**
          * Returns the duration in milliseconds until the group membership of a user is expired. If the
          * membership information is expired it is re-synced according to the maximum nesting depth.
@@ -249,6 +278,56 @@ public class DefaultSyncConfig {
             return this;
         }
 
+        /**
+         * Returns {@code true} if a dynamic group membership is enabled.
+         *
+         * Turning this option on may alter the behavior of other configuration
+         * options dealing with synchronization of group accounts and group membership.
+         * In particular it's an implementation detail if external groups may
+         * no longer be synchronized into the repository.
+         *
+         * @return {@code true} if dynamic group membership for external
+         * user identities is turn on; {@code false} otherwise.
+         */
+        @Nonnull
+        public boolean getDynamicMembership() {
+            return dynamicMembership;
+        }
+
+        /**
+         * Enable or disable the dynamic group membership. If turned external
+         * identities and their group membership will be synchronized such that the
+         * membership information is generated dynamically. External groups may
+         * or may not be synchronized into the repository if this option is turned
+         * on.
+         *
+         * @param dynamicMembership Boolean flag to enable or disable a dedicated
+         *                      dynamic group management.
+         * @return {@code this}
+         * @see #getDynamicMembership() for details.
+         */
+        @Nonnull
+        public User setDynamicMembership(boolean dynamicMembership) {
+            this.dynamicMembership = dynamicMembership;
+            return this;
+        }
+
+        /**
+         * Controls the behavior for users that no longer exist on the external provider. The default is to delete the repository users
+         * if they no longer exist on the external provider. If set to true, they will be disabled instead, and re-enabled once they appear
+         * again.
+         */
+        public boolean getDisableMissing() {
+            return disableMissing;
+        }
+
+        /**
+         * @see #getDisableMissing()
+         */
+        public User setDisableMissing(boolean disableMissing) {
+            this.disableMissing = disableMissing;
+            return this;
+        }
     }
 
     /**

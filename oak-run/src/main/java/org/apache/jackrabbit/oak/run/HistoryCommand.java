@@ -17,14 +17,14 @@
 
 package org.apache.jackrabbit.oak.run;
 
-import static org.apache.jackrabbit.oak.plugins.segment.FileStoreHelper.isValidFileStoreOrFail;
+import static org.apache.jackrabbit.oak.segment.FileStoreHelper.isValidFileStoreOrFail;
 
 import java.io.File;
 
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import org.apache.jackrabbit.oak.plugins.segment.file.tooling.RevisionHistory;
+import org.apache.jackrabbit.oak.run.commons.Command;
 
 class HistoryCommand implements Command {
 
@@ -56,10 +56,7 @@ class HistoryCommand implements Command {
         String journalName = journalArg.value(options);
         File journal = new File(isValidFileStoreOrFail(directory), journalName);
 
-        Iterable<RevisionHistory.HistoryElement> history = new RevisionHistory(directory).getHistory(journal, path);
-        for (RevisionHistory.HistoryElement historyElement : history) {
-            System.out.println(historyElement.toString(depth));
-        }
+        SegmentTarUtils.history(directory, journal, path, depth);
     }
 
 }

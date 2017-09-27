@@ -23,7 +23,7 @@
     <parent>
         <groupId>org.apache.jackrabbit</groupId>
         <artifactId>oak-parent</artifactId>
-        <version>1.6-SNAPSHOT</version>
+        <version>1.8-SNAPSHOT</version>
         <relativePath>../oak-parent/pom.xml</relativePath>
     </parent>
 
@@ -32,7 +32,10 @@
     <packaging>bundle</packaging>
 
     <properties>
-        <apacheds.test.version>2.0.0-M20</apacheds.test.version>
+        <apacheds.test.version>2.0.0-M23</apacheds.test.version>
+        <!-- enable execution of jacoco and set minimal line coverage -->
+        <skip.coverage>false</skip.coverage>
+        <minimum.coverage>0.73</minimum.coverage>
     </properties>
 
     <build>
@@ -54,10 +57,6 @@
                         <Embed-Transitive>true</Embed-Transitive>
                     </instructions>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.felix</groupId>
-                <artifactId>maven-scr-plugin</artifactId>
             </plugin>
             <plugin>
                 <groupId>org.apache.rat</groupId>
@@ -99,36 +98,6 @@
                 </plugins>
             </build>
         </profile>
-        
-        <profile>
-            <!-- Disable LDAP Server Integrations Tests on windows -->
-            <id>disable-ldap-integration-windows</id>
-            <activation>
-                <!-- temporarily disable on windows: OAK-2904 -->
-                <os>
-                    <family>Windows</family>
-                </os>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <excludes>
-                                <exclude>**/LdapProviderTest.class</exclude>
-                                <exclude>**/DefaultLdapLoginModuleTest.class</exclude>
-                                <exclude>**/GuestTokenDefaultLdapLoginModuleTest.class</exclude>
-                                <exclude>**/LdapDefaultLoginModuleTest.class</exclude>
-                                <exclude>**/LdapLoginStandaloneTest.class</exclude>
-                                <exclude>**/TokenDefaultLdapLoginModuleTest.class</exclude>
-                                <exclude>**/LargeLdapProviderTest.class</exclude>
-                            </excludes>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
     </profiles>
 
 
@@ -137,7 +106,7 @@
         <dependency>
             <groupId>org.apache.directory.api</groupId>
             <artifactId>api-all</artifactId>
-            <version>1.0.0-M30</version>
+            <version>1.0.0-RC2</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -164,18 +133,25 @@
             <version>2.7.7</version>
             <scope>provided</scope>
         </dependency>
-
-        <dependency>
-            <groupId>biz.aQute.bnd</groupId>
-            <artifactId>bndlib</artifactId>
-            <scope>provided</scope>
-        </dependency>
         <dependency>
             <groupId>org.apache.felix</groupId>
             <artifactId>org.apache.felix.scr.annotations</artifactId>
             <scope>provided</scope>
         </dependency>
 
+        <!-- JCR and Jackrabbit dependencies -->
+        <dependency>
+            <groupId>javax.jcr</groupId>
+            <artifactId>jcr</artifactId>
+            <version>2.0</version>
+        </dependency>
+
+        <!-- Dependencies to other Oak components -->
+        <dependency>
+            <groupId>org.apache.jackrabbit</groupId>
+            <artifactId>oak-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.jackrabbit</groupId>
             <artifactId>oak-core</artifactId>
@@ -184,7 +160,12 @@
         <dependency>
           <groupId>org.apache.jackrabbit</groupId>
           <artifactId>oak-commons</artifactId>
-          <version>${project.version}</version>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.jackrabbit</groupId>
+            <artifactId>oak-security-spi</artifactId>
+            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.jackrabbit</groupId>
@@ -192,16 +173,10 @@
             <version>${project.version}</version>
         </dependency>
 
+        <!-- General utility libraries -->
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-        </dependency>
-
-        <!-- JCR and Jackrabbit dependencies -->
-        <dependency>
-            <groupId>javax.jcr</groupId>
-            <artifactId>jcr</artifactId>
-            <version>2.0</version>
         </dependency>
 
         <!-- Logging -->

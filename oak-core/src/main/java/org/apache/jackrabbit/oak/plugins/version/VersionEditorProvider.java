@@ -16,8 +16,6 @@
  */
 package org.apache.jackrabbit.oak.plugins.version;
 
-import org.apache.felix.scr.annotations.Component;
-import org.apache.felix.scr.annotations.Service;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditor;
 import org.apache.jackrabbit.oak.spi.commit.Editor;
@@ -28,11 +26,17 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 
 import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_VERSIONSTORAGE;
+import static org.apache.jackrabbit.oak.spi.nodetype.NodeTypeConstants.JCR_VERSIONSTORAGE;
 
-@Component
-@Service(EditorProvider.class)
-public class VersionEditorProvider implements EditorProvider {
+/**
+ * A provider creating two editors: {@link VersionEditor}
+ * {@link VersionStorageEditor}.
+ * <p>
+ * Historically, it has been used to initalize the Jcr repository. Now, the
+ * more general {@link VersionHook} should be passed there using the {@code with()}
+ * method.
+ */
+class VersionEditorProvider implements EditorProvider {
 
     @Override
     public Editor getRootEditor(

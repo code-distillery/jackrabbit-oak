@@ -44,10 +44,14 @@ that contains the segment  (data*.tar) files.
 
 The oak-run compact operation may be used to perform an offline compaction:
 
-    java -mx4g -jar oak-run-*.jar compact <repository> [--force]
+    java -mx4g -jar oak-run-*.jar compact <repository>
 
 It makes sense to find and remove the old checkpoints, using the `checkpoint`
 command described above.
+
+#### Index Management
+
+The oak-run index operation is used to [manage indexes](./query/index-management.html).
 
 #### System properties supported by the oak-run
 
@@ -63,6 +67,13 @@ possible to tweak various system properties to get the optimal performance. Thes
 Example:
 
     java -Dtar.memoryMapped=true -mx4g -jar oak-run-*.jar checkpoint <repository>
+
+#### Analyzing Thread Dumps ####
+
+To analyze thread dumps, filter out idle threads, and get profiling data, use the following, there the directory contains thread dump files:
+
+    java -jar oak-run-*.jar threaddump --filter --profile <directory>
+
 
 ### MongoDB Shell with oak-mongo.js
 

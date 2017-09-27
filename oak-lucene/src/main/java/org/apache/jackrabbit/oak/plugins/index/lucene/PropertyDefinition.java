@@ -26,7 +26,9 @@ import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.lucene.IndexDefinition.IndexingRule;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.FunctionIndexProcessor;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexHelper;
+import org.apache.jackrabbit.oak.plugins.index.property.ValuePattern;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +39,7 @@ import static org.apache.jackrabbit.oak.commons.PathUtils.elements;
 import static org.apache.jackrabbit.oak.commons.PathUtils.isAbsolute;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.FIELD_BOOST;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_IS_REGEX;
+import static org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants.PROP_WEIGHT;
 import static org.apache.jackrabbit.oak.plugins.index.lucene.util.ConfigUtil.getOptionalValue;
 
 class PropertyDefinition {
@@ -92,6 +95,8 @@ class PropertyDefinition {
 
     final boolean excludeFromAggregate;
 
+    final int weight;
+
     /**
      * Property name excluding the relativePath. For regular expression based definition
      * its set to null
@@ -99,11 +104,24 @@ class PropertyDefinition {
     @CheckForNull
     final String nonRelativeName;
 
+    /**
+     * For function-based indexes: the function name, in Polish notation.
+     */    
+    final String function;
+    
+    /**
+     * For function-based indexes: the function code, as tokens.
+     */    
+    final String[] functionCode;
+
+    final ValuePattern valuePattern;
+
     public PropertyDefinition(IndexingRule idxDefn, String nodeName, NodeState defn) {
         this.isRegexp = getOptionalValue(defn, PROP_IS_REGEX, false);
         this.name = getName(defn, nodeName);
         this.relative = isRelativeProperty(name);
         this.boost = getOptionalValue(defn, FIELD_BOOST, DEFAULT_BOOST);
+        this.weight = getOptionalValue(defn, PROP_WEIGHT, -1);
 
         //By default if a property is defined it is indexed
         this.index = getOptionalValue(defn, LuceneIndexConstants.PROP_INDEX, true);
@@ -134,6 +152,10 @@ class PropertyDefinition {
         this.nonRelativeName = determineNonRelativeName();
         this.ancestors = computeAncestors(name);
         this.facet = getOptionalValueIfIndexed(defn, LuceneIndexConstants.PROP_FACETS, false);
+        this.function = FunctionIndexProcessor.convertToPolishNotation(
+                getOptionalValue(defn, LuceneIndexConstants.PROP_FUNCTION, null));
+        this.functionCode = FunctionIndexProcessor.getFunctionCode(this.function);
+        this.valuePattern = new ValuePattern(defn);
         validate();
     }
 

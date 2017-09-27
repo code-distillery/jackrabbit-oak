@@ -20,9 +20,12 @@ import java.security.Principal;
 import java.util.Properties;
 import javax.jcr.Credentials;
 import javax.jcr.GuestCredentials;
+import javax.jcr.Repository;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 
+import org.apache.jackrabbit.oak.plugins.document.bundlor.BundlingConfigInitializer;
+import org.apache.jackrabbit.oak.query.QueryEngineSettings;
 import org.apache.jackrabbit.oak.spi.security.principal.EveryonePrincipal;
 import org.apache.jackrabbit.test.NotExecutableException;
 import org.apache.jackrabbit.test.RepositoryStub;
@@ -43,6 +46,12 @@ abstract class OakRepositoryStub extends RepositoryStub {
         super(env);
     }
 
+    protected QueryEngineSettings getQueryEngineSettings() {
+        QueryEngineSettings settings = new QueryEngineSettings();
+        settings.setFullTextComparisonWithoutIndex(true);
+        return settings;
+    }
+
     @Override
     public Credentials getReadOnlyCredentials() {
         return new GuestCredentials();
@@ -56,6 +65,35 @@ abstract class OakRepositoryStub extends RepositoryStub {
     @Override
     public Principal getUnknownPrincipal(Session session) throws RepositoryException, NotExecutableException {
         return UNKNOWN_PRINCIPAL;
+    }
+
+    /**
+     * Override in subclass and perform additional configuration on the
+     * {@link Jcr} builder before the repository is created. This default
+     * implementation set query engine settings as returned by
+     * {@link #getQueryEngineSettings()} and adds a
+     * {@link BundlingConfigInitializer}.
+     *
+     * @param jcr the builder.
+     */
+    protected void preCreateRepository(Jcr jcr) {
+        jcr.with(getQueryEngineSettings());
+        jcr.with(BundlingConfigInitializer.INSTANCE);
+    }
+
+    protected void loadTestContent(Repository repository)
+            throws RepositoryException {
+        Session session = repository.login(superuser);
+        try {
+            TestContentLoader loader = new TestContentLoader();
+            loader.loadTestContent(session);
+        } catch (RepositoryException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RepositoryException(e);
+        } finally {
+            session.logout();
+        }
     }
 
 }

@@ -17,6 +17,14 @@
 
 package org.apache.jackrabbit.oak.security.authentication.ldap;
 
+import static junit.framework.Assert.assertEquals;
+import static junit.framework.Assert.assertNotNull;
+import static junit.framework.Assert.assertNull;
+import static junit.framework.Assert.assertTrue;
+import static junit.framework.Assert.fail;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertThat;
+
 import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Collection;
@@ -29,12 +37,13 @@ import java.util.Map;
 import javax.jcr.SimpleCredentials;
 import javax.security.auth.login.LoginException;
 
-import com.google.common.collect.ImmutableMap;
+import org.apache.directory.api.util.Strings;
 import org.apache.directory.server.constants.ServerDNConstants;
 import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapIdentityProvider;
 import org.apache.jackrabbit.oak.security.authentication.ldap.impl.LdapProviderConfig;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalGroup;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentity;
+import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityException;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityRef;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalUser;
 import org.apache.jackrabbit.util.Text;
@@ -44,15 +53,6 @@ import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.Ignore;
-
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertNotNull;
-import static junit.framework.Assert.assertNull;
-import static junit.framework.Assert.assertTrue;
-import static junit.framework.Assert.fail;
-
-import static org.junit.Assert.assertThat;
 
 public class LdapProviderTest {
 
@@ -100,18 +100,26 @@ public class LdapProviderTest {
         if (!USE_COMMON_LDAP_FIXTURE) {
             LDAP_SERVER.tearDown();
         }
-        idp.close();
-        idp = null;
+        if (idp != null) {
+            idp.close();
+            idp = null;
+        }
     }
 
     protected LdapIdentityProvider createIDP() {
+        //The attribute "mail" is excluded deliberately
+        return createIDP(new String[] { "objectclass", "uid", "givenname", "description", "sn"});
+    }
+
+    protected LdapIdentityProvider createIDP(String[] userProperties) {
         providerConfig = new LdapProviderConfig()
                 .setName(IDP_NAME)
                 .setHostname("127.0.0.1")
                 .setPort(LDAP_SERVER.getPort())
                 .setBindDN(ServerDNConstants.ADMIN_SYSTEM_DN)
                 .setBindPassword(InternalLdapServer.ADMIN_PW)
-                .setGroupMemberAttribute("uniquemember");
+                .setGroupMemberAttribute("uniquemember")
+                .setCustomAttributes(userProperties);
 
         providerConfig.getUserConfig()
                 .setBaseDN(ServerDNConstants.USERS_SYSTEM_DN)
@@ -205,10 +213,11 @@ public class LdapProviderTest {
                         Matchers.equalTo("objectclass"),
                         Matchers.containsInAnyOrder( "inetOrgPerson", "top", "person", "organizationalPerson")));
         assertThat(properties, Matchers.<String, Object>hasEntry("uid", "hhornblo"));
-        assertThat(properties, Matchers.<String, Object>hasEntry("mail", "hhornblo@royalnavy.mod.uk"));
         assertThat(properties, Matchers.<String, Object>hasEntry("givenname", "Horatio"));
         assertThat(properties, Matchers.<String, Object>hasEntry("description", "Capt. Horatio Hornblower, R.N"));
         assertThat(properties, Matchers.<String, Object>hasEntry("sn", "Hornblower"));
+
+        assertThat(properties, Matchers.not(Matchers.<String, Object>hasEntry("mail", "hhornblo@royalnavy.mod.uk")));
     }
 
     @Test
@@ -401,6 +410,31 @@ public class LdapProviderTest {
         assertEquals("Intermediate path must be the split dn", TEST_USER5_PATH, user.getIntermediatePath());
     }
 
+    @Test
+    public void testRemoveEmptyString() throws Exception {
+        providerConfig.setCustomAttributes(new String[] {"a", Strings.EMPTY_STRING, "b" });
+        assertArrayEquals("Array must not contain empty strings", new String[] {"a", "b" }, providerConfig.getCustomAttributes());
+    }
+
+    @Test
+    public void testResolvePrincipalNameUser() throws ExternalIdentityException {
+        ExternalUser user = idp.getUser(TEST_USER5_UID);
+        assertNotNull(user);
+        assertEquals(user.getPrincipalName(), idp.fromExternalIdentityRef(user.getExternalId()));
+    }
+
+    @Test
+    public void testResolvePrincipalNameGroup() throws ExternalIdentityException {
+        ExternalGroup gr = idp.getGroup(TEST_GROUP1_NAME);
+        assertNotNull(gr);
+
+        assertEquals(gr.getPrincipalName(), idp.fromExternalIdentityRef(gr.getExternalId()));
+    }
+
+    @Test(expected = ExternalIdentityException.class)
+    public void testResolvePrincipalNameForeignExtId() throws Exception {
+        idp.fromExternalIdentityRef(new ExternalIdentityRef("anyId", "anotherProviderName"));
+    }
 
     public static void assertIfEquals(String message, String[] expected, Iterable<ExternalIdentityRef> result) {
         List<String> dns = new LinkedList<String>();

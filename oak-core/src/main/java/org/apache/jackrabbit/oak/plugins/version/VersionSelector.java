@@ -34,18 +34,18 @@ import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
  * [of the version] depends on the configuration of the workspace and is outside
  * the scope of this specification."</em>
  * <p>
- * The version selection in jackrabbit works as follows:<br/>
+ * The version selection in jackrabbit works as follows:<br>
  * The {@code Node.restore()} methods uses the
  * {@link DateVersionSelector} which is initialized with the creation date of
  * the parent version. This selector selects the latest version that is equal
  * or older than the given date. if no such version exists, the initial one
- * is restored.<br/>
+ * is restored.<br>
  * <p>
  *
  * @see DateVersionSelector
  * @see javax.jcr.version.VersionManager#restore
  */
-public interface VersionSelector {
+interface VersionSelector {
 
     /**
      * Selects a version of the given version history. If this VersionSelector

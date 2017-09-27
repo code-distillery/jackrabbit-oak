@@ -16,12 +16,9 @@
  */
 package org.apache.jackrabbit.oak.security.user;
 
-import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.PropertyState;
@@ -35,7 +32,7 @@ import org.apache.jackrabbit.oak.spi.security.user.UserConstants;
 import org.apache.jackrabbit.oak.spi.security.user.util.PasswordUtil;
 import org.apache.jackrabbit.oak.spi.security.user.util.UserUtil;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
-import org.apache.jackrabbit.oak.util.TreeUtil;
+import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.apache.jackrabbit.util.Text;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -80,10 +77,6 @@ class UserValidator extends DefaultValidator implements UserConstants {
             String msg = "Invalid jcr:uuid for authorizable " + parentAfter.getName();
             throw constraintViolation(21, msg);
         }
-
-        if (REP_MEMBERS.equals(name)) {
-            checkForCyclicMembership(after.getValue(Type.STRINGS));
-        }
     }
 
     @Override
@@ -111,12 +104,6 @@ class UserValidator extends DefaultValidator implements UserConstants {
         if (isUser(parentBefore) && REP_PASSWORD.equals(name) && PasswordUtil.isPlainTextPassword(after.getValue(Type.STRING))) {
             String msg = "Password may not be plain text.";
             throw constraintViolation(24, msg);
-        }
-
-        if (REP_MEMBERS.equals(name)) {
-            Set<String> addedValues = Sets.newHashSet(after.getValue(Type.STRINGS));
-            addedValues.removeAll(ImmutableSet.copyOf(before.getValue(Type.STRINGS)));
-            checkForCyclicMembership(addedValues);
         }
     }
 
@@ -183,20 +170,6 @@ class UserValidator extends DefaultValidator implements UserConstants {
         }
     }
 
-    private void checkForCyclicMembership(@Nonnull Iterable<String> memberRefs) throws CommitFailedException {
-        String groupContentId = TreeUtil.getString(parentAfter, JcrConstants.JCR_UUID);
-        if (groupContentId == null) {
-            throw constraintViolation(30, "Missing content id for group " + UserUtil.getAuthorizableId(parentAfter) + "; cannot check for cyclic group membership.");
-        }
-        MembershipProvider mp = provider.getMembershipProvider();
-        for (String memberContentId : memberRefs) {
-            Tree memberTree = mp.getByContentID(memberContentId, AuthorizableType.GROUP);
-            if (memberTree != null && mp.isMember(memberTree, parentAfter)) {
-                throw constraintViolation(31, "Cyclic group membership detected in group" + UserUtil.getAuthorizableId(parentAfter));
-            }
-        }
-    }
-
     private void validateAuthorizable(@Nonnull Tree tree, @Nullable AuthorizableType type) throws CommitFailedException {
         boolean isSystemUser = (type == AuthorizableType.USER) && UserUtil.isSystemUser(tree);
         String authRoot = UserUtil.getAuthorizableRootPath(provider.getConfig(), type);
@@ -223,9 +196,9 @@ class UserValidator extends DefaultValidator implements UserConstants {
         }
     }
 
-    private static boolean isValidUUID(@Nonnull Tree parent, @Nonnull String uuid) {
+    private boolean isValidUUID(@Nonnull Tree parent, @Nonnull String uuid) {
         String id = UserUtil.getAuthorizableId(parent);
-        return id != null && uuid.equals(UserProvider.getContentID(id));
+        return id != null && uuid.equals(provider.getMembershipProvider().getContentID(id));
     }
 
     private static boolean isUser(@Nullable Tree tree) {

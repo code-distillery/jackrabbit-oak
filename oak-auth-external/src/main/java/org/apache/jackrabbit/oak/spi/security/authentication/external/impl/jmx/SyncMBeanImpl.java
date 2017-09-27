@@ -17,8 +17,9 @@
 package org.apache.jackrabbit.oak.spi.security.authentication.external.impl.jmx;
 
 import javax.annotation.Nonnull;
-import javax.jcr.Repository;
 
+import org.apache.jackrabbit.oak.api.ContentRepository;
+import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.ExternalIdentityProviderManager;
 import org.apache.jackrabbit.oak.spi.security.authentication.external.SyncHandler;
@@ -33,7 +34,9 @@ public class SyncMBeanImpl implements SynchronizationMBean {
 
     private static final Logger log = LoggerFactory.getLogger(SyncMBeanImpl.class);
 
-    private final Repository repository;
+    private final ContentRepository repository;
+
+    private final SecurityProvider securityProvider;
 
     private final SyncManager syncManager;
 
@@ -43,9 +46,11 @@ public class SyncMBeanImpl implements SynchronizationMBean {
 
     private final String idpName;
 
-    public SyncMBeanImpl(Repository repository, SyncManager syncManager, String syncName,
-                         ExternalIdentityProviderManager idpManager, String idpName) {
+    public SyncMBeanImpl(@Nonnull ContentRepository repository, @Nonnull SecurityProvider securityProvider,
+                         @Nonnull SyncManager syncManager, @Nonnull String syncName,
+                         @Nonnull ExternalIdentityProviderManager idpManager, @Nonnull String idpName) {
         this.repository = repository;
+        this.securityProvider = securityProvider;
         this.syncManager = syncManager;
         this.syncName = syncName;
         this.idpManager = idpManager;
@@ -64,7 +69,7 @@ public class SyncMBeanImpl implements SynchronizationMBean {
             log.error("No idp available for name", idpName);
             throw new IllegalArgumentException("No idp manager available for name " + idpName);
         }
-        return Delegatee.createInstance(repository, handler, idp);
+        return Delegatee.createInstance(repository, securityProvider, handler, idp);
     }
 
     //-----------------------------------------------< SynchronizationMBean >---
@@ -83,15 +88,9 @@ public class SyncMBeanImpl implements SynchronizationMBean {
     @Nonnull
     @Override
     public String[] syncUsers(@Nonnull String[] userIds, boolean purge) {
-        return syncUsers(userIds, purge, true);
-    }
-
-    @Nonnull
-    @Override
-    public String[] syncUsers(@Nonnull String[] userIds, boolean purge, boolean forceGroupSync) {
         Delegatee delegatee = getDelegatee();
         try {
-            return delegatee.syncUsers(userIds, purge, forceGroupSync);
+            return delegatee.syncUsers(userIds, purge);
         } finally {
             delegatee.close();
         }
@@ -100,15 +99,9 @@ public class SyncMBeanImpl implements SynchronizationMBean {
     @Nonnull
     @Override
     public String[] syncAllUsers(boolean purge) {
-        return syncAllUsers(purge, true);
-    }
-
-    @Nonnull
-    @Override
-    public String[] syncAllUsers(boolean purge, boolean forceGroupSync) {
         Delegatee delegatee = getDelegatee();
         try {
-            return delegatee.syncAllUsers(purge, forceGroupSync);
+            return delegatee.syncAllUsers(purge);
         } finally {
             delegatee.close();
         }
@@ -117,15 +110,9 @@ public class SyncMBeanImpl implements SynchronizationMBean {
     @Nonnull
     @Override
     public String[] syncExternalUsers(@Nonnull String[] externalIds) {
-        return syncExternalUsers(externalIds, true);
-    }
-
-    @Nonnull
-    @Override
-    public String[] syncExternalUsers(@Nonnull String[] externalIds, boolean forceGroupSync) {
         Delegatee delegatee = getDelegatee();
         try {
-            return delegatee.syncExternalUsers(externalIds, forceGroupSync);
+            return delegatee.syncExternalUsers(externalIds);
         } finally {
             delegatee.close();
         }
@@ -134,15 +121,9 @@ public class SyncMBeanImpl implements SynchronizationMBean {
     @Nonnull
     @Override
     public String[] syncAllExternalUsers() {
-        return syncAllExternalUsers(true);
-    }
-
-    @Nonnull
-    @Override
-    public String[] syncAllExternalUsers(boolean forceGroupSync) {
         Delegatee delegatee = getDelegatee();
         try {
-            return delegatee.syncAllExternalUsers(forceGroupSync);
+            return delegatee.syncAllExternalUsers();
         } finally {
             delegatee.close();
         }

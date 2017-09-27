@@ -16,15 +16,15 @@
  */
 package org.apache.jackrabbit.oak.query;
 
-import static org.apache.jackrabbit.JcrConstants.JCR_SYSTEM;
-import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.JCR_NODE_TYPES;
-import static org.apache.jackrabbit.oak.plugins.nodetype.write.InitialContent.INITIAL_CONTENT;
+import static org.apache.jackrabbit.oak.InitialContent.INITIAL_CONTENT;
 import static org.junit.Assert.assertTrue;
 
 import java.text.ParseException;
 
+import org.apache.jackrabbit.oak.namepath.NamePathMapper;
+import org.apache.jackrabbit.oak.query.ast.NodeTypeInfoProvider;
+import org.apache.jackrabbit.oak.query.stats.QueryStatsData;
 import org.apache.jackrabbit.oak.query.xpath.XPathToSQL2Converter;
-import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.junit.Test;
 
 /**
@@ -32,10 +32,21 @@ import org.junit.Test;
  */
 public class SQL2ParserTest {
 
-    private final NodeState types =
-            INITIAL_CONTENT.getChildNode(JCR_SYSTEM).getChildNode(JCR_NODE_TYPES);
+    private static final NodeTypeInfoProvider nodeTypes = new NodeStateNodeTypeInfoProvider(INITIAL_CONTENT);
 
-    private final SQL2Parser p = new SQL2Parser(null, types, new QueryEngineSettings());
+    private static final SQL2Parser p = createTestSQL2Parser();
+    
+    public static SQL2Parser createTestSQL2Parser() {
+        return createTestSQL2Parser(NamePathMapper.DEFAULT, nodeTypes, new QueryEngineSettings());
+    }
+    
+    public static SQL2Parser createTestSQL2Parser(NamePathMapper mappings, NodeTypeInfoProvider nodeTypes2,
+            QueryEngineSettings qeSettings) {
+        QueryStatsData data = new QueryStatsData("", "");
+        return new SQL2Parser(mappings, nodeTypes2, new QueryEngineSettings(), 
+                data.new QueryExecutionStats());
+    }
+
 
     @Test
     public void testIgnoreSqlComment() throws ParseException {
@@ -57,7 +68,6 @@ public class SQL2ParserTest {
                 .convert("/jcr:root/test/*/nt:resource[@jcr:encoding]"));
         p.parse(new XPathToSQL2Converter()
                 .convert("/jcr:root/test/*/*/nt:resource[@jcr:encoding]"));        
-        
         String xpath = "/jcr:root/etc/commerce/products//*[@cq:commerceType = 'product' " +
                 "and ((@size = 'M' or */@size= 'M' or */*/@size = 'M' " +
                 "or */*/*/@size = 'M' or */*/*/*/@size = 'M' or */*/*/*/*/@size = 'M'))]";
@@ -73,5 +83,5 @@ public class SQL2ParserTest {
         String token = "and b.[type] in('t1', 't2', 't3')";
         assertTrue(q.contains(token));
     }
-    
+
 }

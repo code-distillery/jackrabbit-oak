@@ -25,17 +25,18 @@ import java.util.Collections;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.commons.jmx.AnnotatedStandardMBean;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditor;
 import org.apache.jackrabbit.oak.spi.state.ChildNodeEntry;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
-import org.apache.jackrabbit.oak.util.ApproximateCounter;
+import org.apache.jackrabbit.oak.plugins.index.counter.ApproximateCounter;
 
 /**
  * A mechanism to retrieve node counter data.
  */
-public class NodeCounter implements NodeCounterMBean {
+public class NodeCounter extends AnnotatedStandardMBean implements NodeCounterMBean {
     
     /**
      * Approximate count using the hashed name (deterministically, so that after
@@ -47,6 +48,7 @@ public class NodeCounter implements NodeCounterMBean {
     private final NodeStore store;
     
     public NodeCounter(NodeStore store) {
+        super(NodeCounterMBean.class);
         this.store = store;
     }
     
@@ -123,6 +125,10 @@ public class NodeCounter implements NodeCounterMBean {
             return -1;
         }
         s = child(s, NodeCounterEditor.DATA_NODE_NAME);
+        if (!s.exists()) {
+            // no index data (not yet indexed, or very few nodes)
+            return -1;
+        }        
         s = child(s, PathUtils.elements(path));
         if (s == null || !s.exists()) {
             // we have an index, but no data
@@ -164,6 +170,10 @@ public class NodeCounter implements NodeCounterMBean {
             return -1;
         }
         s = child(s, NodeCounterEditor.DATA_NODE_NAME);
+        if (!s.exists()) {
+            // no index data (not yet indexed, or very few nodes)
+            return -1;
+        }
         s = child(s, PathUtils.elements(path));
         if (s != null && s.exists()) {
             value = getCombinedCountIfAvailable(s);

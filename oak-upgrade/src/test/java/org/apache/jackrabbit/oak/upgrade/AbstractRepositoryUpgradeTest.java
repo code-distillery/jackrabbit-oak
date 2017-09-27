@@ -40,8 +40,8 @@ import org.apache.jackrabbit.core.RepositoryImpl;
 import org.apache.jackrabbit.core.config.RepositoryConfig;
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.jcr.Jcr;
-import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
-import org.apache.jackrabbit.oak.plugins.segment.memory.MemoryStore;
+import org.apache.jackrabbit.oak.segment.SegmentNodeStoreBuilders;
+import org.apache.jackrabbit.oak.segment.memory.MemoryStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.stats.Clock;
 import org.junit.After;
@@ -73,7 +73,7 @@ public abstract class AbstractRepositoryUpgradeTest {
 
     protected NodeStore createTargetNodeStore() {
         try {
-            return SegmentNodeStore.builder(new MemoryStore()).build();
+            return SegmentNodeStoreBuilders.builder(new MemoryStore()).build();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -160,24 +160,30 @@ public abstract class AbstractRepositoryUpgradeTest {
     protected void assertExisting(final String... paths) throws RepositoryException {
         final Session session = createAdminSession();
         try {
-            for (final String path : paths) {
-                final String relPath = path.substring(1);
-                assertTrue("node " + path + " should exist", session.getRootNode().hasNode(relPath));
-            }
+            assertExisting(session, paths);
         } finally {
             session.logout();
+        }
+    }
+
+    protected void assertExisting(final Session session, final String... paths) throws RepositoryException {
+        for (final String path : paths) {
+            assertTrue("node " + path + " should exist", session.nodeExists(path));
         }
     }
 
     protected void assertMissing(final String... paths) throws RepositoryException {
         final Session session = createAdminSession();
         try {
-            for (final String path : paths) {
-                final String relPath = path.substring(1);
-                assertFalse("node " + path + " should not exist", session.getRootNode().hasNode(relPath));
-            }
+            assertMissing(session, paths);
         } finally {
             session.logout();
+        }
+    }
+
+    protected void assertMissing(final Session session, final String... paths) throws RepositoryException {
+        for (final String path : paths) {
+            assertFalse("node " + path + " should not exist", session.nodeExists(path));
         }
     }
 }

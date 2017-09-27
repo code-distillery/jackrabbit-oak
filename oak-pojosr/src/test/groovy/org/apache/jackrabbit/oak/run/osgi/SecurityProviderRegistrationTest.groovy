@@ -17,6 +17,8 @@
 package org.apache.jackrabbit.oak.run.osgi
 
 import org.apache.felix.connect.launch.PojoServiceRegistry
+import org.apache.felix.scr.Component
+import org.apache.felix.scr.ScrService
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters
 import org.apache.jackrabbit.oak.spi.security.Context
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider
@@ -26,12 +28,19 @@ import org.apache.jackrabbit.oak.spi.security.authorization.restriction.Restrict
 import org.apache.jackrabbit.oak.spi.security.principal.PrincipalConfiguration
 import org.apache.jackrabbit.oak.spi.security.user.AuthorizableNodeName
 import org.apache.jackrabbit.oak.spi.security.user.UserAuthenticationFactory
+import org.apache.jackrabbit.oak.spi.security.user.UserConfiguration
+import org.apache.jackrabbit.oak.spi.security.user.action.AccessControlAction
+import org.apache.jackrabbit.oak.spi.security.user.action.AuthorizableAction
 import org.apache.jackrabbit.oak.spi.security.user.action.AuthorizableActionProvider
 import org.junit.Before
 import org.junit.Test
+import org.osgi.framework.Filter
+import org.osgi.framework.ServiceEvent
+import org.osgi.framework.ServiceListener
 import org.osgi.framework.ServiceReference
 import org.osgi.service.cm.ConfigurationAdmin
 
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 import static org.mockito.Mockito.mock
@@ -50,7 +59,7 @@ class SecurityProviderRegistrationTest extends AbstractRepositoryFactoryTest {
     protected PojoServiceRegistry getRegistry() {
         return registry
     }
-/**
+    /**
      * Test that, without any additional configuration, a SecurityProvider
      * service is registered by default.
      */
@@ -142,13 +151,16 @@ class SecurityProviderRegistrationTest extends AbstractRepositoryFactoryTest {
     public void testMultipleRequiredServices() {
 
         // Set up the SecurityProvider to require 4 services
-
-        setRequiredServicePids(
-                "test.RequiredAuthorizationConfiguration",
-                "test.RequiredPrincipalConfiguration",
-                "test.RequiredTokenConfiguration",
-                "test.RestrictionProvider")
-        TimeUnit.MILLISECONDS.sleep(500)
+        awaitServiceEvent({
+                    setRequiredServicePids(
+                            "test.RequiredAuthorizationConfiguration",
+                            "test.RequiredPrincipalConfiguration",
+                            "test.RequiredTokenConfiguration",
+                            "test.RestrictionProvider")
+                },
+                "(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)",
+                ServiceEvent.UNREGISTERING
+        )
         assert securityProviderServiceReferences == null
 
         // Start the services and verify that only at the end the
@@ -178,13 +190,125 @@ class SecurityProviderRegistrationTest extends AbstractRepositoryFactoryTest {
         assert securityProviderServiceReferences != null
     }
 
+    @Test
+    public void testSecurityConfigurations() {
+        SecurityProvider securityProvider = registry.getService(registry.getServiceReference(SecurityProvider.class.name))
+        assertAuthorizationConfig(securityProvider)
+        assertUserConfig(securityProvider)
+
+        //Keep a dummy reference to UserConfiguration such that SCR does not deactivate it
+        //once SecurityProviderRegistration gets deactivated. Otherwise if SecurityProviderRegistration is
+        //the only component that refers it then upon its deactivation UserConfiguration would also be
+        //deactivate and its internal state would be reset
+        UserConfiguration userConfiguration = getServiceWithWait(UserConfiguration.class)
+
+
+        ScrService scr = getServiceWithWait(ScrService.class)
+        Component[] c = scr.getComponents('org.apache.jackrabbit.oak.security.authentication.AuthenticationConfigurationImpl')
+        assert c
+
+        // 1. Disable AuthenticationConfiguration such that SecurityProvider is unregistered
+        awaitServiceEvent({
+                    c[0].disable()
+                },
+                '(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)',
+                ServiceEvent.UNREGISTERING
+        )
+
+        assert securityProviderServiceReferences == null
+
+        // 2. Modify the config for AuthorizableActionProvider. It's expected that this config change is picked up
+        awaitServiceEvent({
+                    setConfiguration([
+                            "org.apache.jackrabbit.oak.spi.security.user.action.DefaultAuthorizableActionProvider": [
+                                    "groupPrivilegeNames":"jcr:read"
+                            ]
+                    ])
+                },
+                classNameFilter('org.apache.jackrabbit.oak.spi.security.user.action.DefaultAuthorizableActionProvider'),
+                ServiceEvent.MODIFIED | ServiceEvent.REGISTERED
+        )
+
+        // 3. Enable component again such that SecurityProvider gets reactivated
+        awaitServiceEvent({
+                    c[0].enable()
+                },
+                '(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)',
+                ServiceEvent.REGISTERED
+        )
+
+        securityProvider = getServiceWithWait(SecurityProvider.class)
+        assertAuthorizationConfig(securityProvider)
+        assertUserConfig(securityProvider, "jcr:read")
+    }
+
+    @Test
+    public void testSecurityConfigurations2() {
+        SecurityProvider securityProvider = registry.getService(registry.getServiceReference(SecurityProvider.class.name))
+        assertAuthorizationConfig(securityProvider)
+        assertUserConfig(securityProvider)
+
+        //Keep a dummy reference to UserConfiguration such that SCR does not deactivate it
+        //once SecurityProviderRegistration gets deactivated. Otherwise if SecurityProviderRegistration is
+        //the only component that refers it then upon its deactivation UserConfiguration would also be
+        //deactivate and its internal state would be reset
+        UserConfiguration userConfiguration = getServiceWithWait(UserConfiguration.class)
+
+        //1. Modify the config for AuthorizableActionProvider. It's expected that this config change is picked up
+        def servicePid = "org.apache.jackrabbit.oak.spi.security.user.action.DefaultAuthorizableActionProvider"
+        awaitServiceEvent({
+            setConfiguration([
+                        (servicePid): [
+                                "groupPrivilegeNames":"jcr:read"
+                        ]
+                ]
+            )},
+            "(service.pid=${servicePid})",
+            ServiceEvent.MODIFIED | ServiceEvent.REGISTERED
+        )
+
+        securityProvider = getServiceWithWait(SecurityProvider.class)
+        assertAuthorizationConfig(securityProvider)
+        assertUserConfig(securityProvider, "jcr:read")
+
+        ScrService scr = getServiceWithWait(ScrService.class)
+        Component[] c = scr.getComponents('org.apache.jackrabbit.oak.security.authentication.AuthenticationConfigurationImpl')
+        assert c
+
+        // 2. Disable AuthenticationConfiguration such that SecurityProvider is unregistered
+        awaitServiceEvent({
+                    c[0].disable()
+                },
+                "(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)",
+                ServiceEvent.UNREGISTERING
+        )
+
+        assert securityProviderServiceReferences == null
+
+        // 3. Enable component again such that SecurityProvider gets reactivated
+        awaitServiceEvent({
+                    c[0].enable()
+                },
+                "(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)",
+                ServiceEvent.REGISTERED
+        )
+
+        securityProvider = getServiceWithWait(SecurityProvider.class)
+        assertAuthorizationConfig(securityProvider)
+        assertUserConfig(securityProvider, "jcr:read")
+    }
+
     private <T> void testRequiredService(Class<T> serviceClass, T service) {
 
         // Adding a new precondition on a missing service PID forces the
         // SecurityProvider to unregister.
 
-        setRequiredServicePids("test.Required" + serviceClass.simpleName)
-        TimeUnit.MILLISECONDS.sleep(500)
+        awaitServiceEvent({
+                    setRequiredServicePids("test.Required" + serviceClass.simpleName)
+                },
+                "(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)",
+                ServiceEvent.UNREGISTERING
+        )
         assert securityProviderServiceReferences == null
 
         // If a service is registered, and if the PID of the service matches the
@@ -200,9 +324,12 @@ class SecurityProviderRegistrationTest extends AbstractRepositoryFactoryTest {
         assert securityProviderServiceReferences == null
 
         // Removing the precondition allows the SecurityProvider to register.
-
-        setRequiredServicePids()
-        TimeUnit.MILLISECONDS.sleep(500)
+        awaitServiceEvent({
+                    setRequiredServicePids()
+                },
+                "(objectClass=org.apache.jackrabbit.oak.spi.security.SecurityProvider)",
+                ServiceEvent.REGISTERED
+        )
         assert securityProviderServiceReferences != null
     }
 
@@ -232,6 +359,30 @@ class SecurityProviderRegistrationTest extends AbstractRepositoryFactoryTest {
 
     private static <K, V> Dictionary<K, V> dict(Map<K, V> map) {
         return new Hashtable<K, V>(map);
+    }
+
+    private static void assertAuthorizationConfig(SecurityProvider securityProvider, String... adminPrincipals) {
+        AuthorizationConfiguration ac = securityProvider.getConfiguration(AuthorizationConfiguration.class)
+
+        assert ac.getParameters().containsKey("restrictionProvider")
+        assert ac.getRestrictionProvider() != null
+        assert ac.getParameters().get("restrictionProvider") == ac.getRestrictionProvider()
+
+        String[] found = ac.getParameters().getConfigValue("administrativePrincipals", new String[0])
+        assert Arrays.equals(adminPrincipals, found)
+    }
+
+    private static void assertUserConfig(SecurityProvider securityProvider, String... groupPrivilegeNames) {
+        UserConfiguration uc = securityProvider.getConfiguration(UserConfiguration.class)
+
+        assert uc.getParameters().containsKey("authorizableActionProvider")
+        AuthorizableActionProvider ap = uc.getParameters().get("authorizableActionProvider")
+        assert ap != null;
+
+        List<AuthorizableAction> actionList = ap.getAuthorizableActions(securityProvider)
+        assert actionList.size() == 1
+        AuthorizableAction action = actionList.get(0)
+        assert Arrays.equals(groupPrivilegeNames, ((AccessControlAction) action).groupPrivilegeNames)
     }
 
 }

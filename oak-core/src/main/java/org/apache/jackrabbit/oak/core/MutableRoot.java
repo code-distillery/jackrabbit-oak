@@ -34,6 +34,7 @@ import java.util.Map;
 import javax.annotation.Nonnull;
 import javax.security.auth.Subject;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.jackrabbit.oak.api.Blob;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.ContentSession;
@@ -44,6 +45,7 @@ import org.apache.jackrabbit.oak.plugins.index.diffindex.UUIDDiffIndexProviderWr
 import org.apache.jackrabbit.oak.query.ExecutionContext;
 import org.apache.jackrabbit.oak.query.QueryEngineImpl;
 import org.apache.jackrabbit.oak.query.QueryEngineSettings;
+import org.apache.jackrabbit.oak.spi.commit.CommitContext;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.CompositeEditorProvider;
@@ -52,9 +54,10 @@ import org.apache.jackrabbit.oak.spi.commit.EditorHook;
 import org.apache.jackrabbit.oak.spi.commit.EmptyHook;
 import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.PostValidationHook;
+import org.apache.jackrabbit.oak.spi.commit.ResetCommitAttributeHook;
+import org.apache.jackrabbit.oak.spi.commit.SimpleCommitContext;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
 import org.apache.jackrabbit.oak.spi.query.QueryIndexProvider;
-import org.apache.jackrabbit.oak.spi.security.Context;
 import org.apache.jackrabbit.oak.spi.security.SecurityConfiguration;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authorization.AuthorizationConfiguration;
@@ -158,7 +161,7 @@ class MutableRoot implements Root {
         this.session = checkNotNull(session);
 
         builder = store.getRoot().builder();
-        secureBuilder = new SecureNodeBuilder(builder, permissionProvider, getAcContext());
+        secureBuilder = new SecureNodeBuilder(builder, permissionProvider);
         rootTree = new MutableTree(this, secureBuilder, lastMove);
     }
 
@@ -243,7 +246,7 @@ class MutableRoot implements Root {
         checkLive();
         ContentSession session = getContentSession();
         CommitInfo commitInfo = new CommitInfo(
-                session.toString(), session.getAuthInfo().getUserID(), info);
+                session.toString(), session.getAuthInfo().getUserID(), newInfoWithCommitContext(info));
         store.merge(builder, getCommitHook(), commitInfo);
         secureBuilder.baseChanged();
         modCount = 0;
@@ -267,10 +270,12 @@ class MutableRoot implements Root {
      */
     private CommitHook getCommitHook() {
         List<CommitHook> hooks = newArrayList();
-
+        hooks.add(ResetCommitAttributeHook.INSTANCE);
         hooks.add(hook);
 
         List<CommitHook> postValidationHooks = new ArrayList<CommitHook>();
+        List<ValidatorProvider> validators = new ArrayList<>();
+
         for (SecurityConfiguration sc : securityProvider.getConfigurations()) {
             for (CommitHook ch : sc.getCommitHooks(workspaceName)) {
                 if (ch instanceof PostValidationHook) {
@@ -280,10 +285,11 @@ class MutableRoot implements Root {
                 }
             }
 
-            List<? extends ValidatorProvider> validators = sc.getValidators(workspaceName, subject.getPrincipals(), moveTracker);
-            if (!validators.isEmpty()) {
-                hooks.add(new EditorHook(CompositeEditorProvider.compose(validators)));
-            }
+            validators.addAll(sc.getValidators(workspaceName, subject.getPrincipals(), moveTracker));
+        }
+
+        if (!validators.isEmpty()) {
+            hooks.add(new EditorHook(CompositeEditorProvider.compose(validators)));
         }
         hooks.addAll(postValidationHooks);
 
@@ -356,13 +362,15 @@ class MutableRoot implements Root {
     }
 
     @Nonnull
-    private Context getAcContext() {
-        return getAcConfig().getContext();
-    }
-
-    @Nonnull
     private AuthorizationConfiguration getAcConfig() {
         return securityProvider.getConfiguration(AuthorizationConfiguration.class);
+    }
+
+    private static Map<String, Object> newInfoWithCommitContext(Map<String, Object> info){
+        return ImmutableMap.<String, Object>builder()
+                .putAll(info)
+                .put(CommitContext.NAME, new SimpleCommitContext())
+                .build();
     }
 
     //---------------------------------------------------------< MoveRecord >---

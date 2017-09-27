@@ -19,10 +19,10 @@
 package org.apache.jackrabbit.oak.query.index;
 
 import org.apache.jackrabbit.oak.commons.PathUtils;
+import org.apache.jackrabbit.oak.plugins.index.Cursors;
 import org.apache.jackrabbit.oak.plugins.index.counter.jmx.NodeCounter;
 import org.apache.jackrabbit.oak.query.ast.JoinConditionImpl;
 import org.apache.jackrabbit.oak.spi.query.Cursor;
-import org.apache.jackrabbit.oak.spi.query.Cursors;
 import org.apache.jackrabbit.oak.spi.query.Filter;
 import org.apache.jackrabbit.oak.spi.query.Filter.PathRestriction;
 import org.apache.jackrabbit.oak.spi.query.QueryIndex;
@@ -41,6 +41,32 @@ public class TraversingIndex implements QueryIndex {
     @Override
     public Cursor query(Filter filter, NodeState rootState) {
         return Cursors.newTraversingCursor(filter, rootState);
+    }
+    
+    public boolean isPotentiallySlow(Filter filter, NodeState rootState) {
+        if (filter.getFullTextConstraint() != null) {
+            // not an appropriate index for full-text search
+            return true;
+        }
+        if (filter.containsNativeConstraint()) {
+            // not an appropriate index for native search
+            return true;
+        }
+        if (filter.isAlwaysFalse()) {
+            return false;
+        }
+        PathRestriction restriction = filter.getPathRestriction();
+        switch (restriction) {
+        case EXACT:
+        case PARENT:
+        case DIRECT_CHILDREN:
+            return false;
+        case NO_RESTRICTION:
+        case ALL_CHILDREN:
+            return true;
+        default:
+            throw new IllegalArgumentException("Unknown restriction: " + restriction);
+        }
     }
 
     @Override

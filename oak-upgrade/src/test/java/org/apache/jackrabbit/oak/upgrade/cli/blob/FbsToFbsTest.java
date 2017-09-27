@@ -20,7 +20,9 @@ import org.apache.jackrabbit.oak.upgrade.cli.AbstractOak2OakTest;
 import org.apache.jackrabbit.oak.upgrade.cli.container.BlobStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.FileBlobStoreContainer;
 import org.apache.jackrabbit.oak.upgrade.cli.container.NodeStoreContainer;
-import org.apache.jackrabbit.oak.upgrade.cli.container.SegmentNodeStoreContainer;
+import org.apache.jackrabbit.oak.upgrade.cli.container.SegmentTarNodeStoreContainer;
+
+import java.io.IOException;
 
 public class FbsToFbsTest extends AbstractOak2OakTest {
 
@@ -32,11 +34,11 @@ public class FbsToFbsTest extends AbstractOak2OakTest {
 
     private final NodeStoreContainer destination;
 
-    public FbsToFbsTest() {
+    public FbsToFbsTest() throws IOException {
         sourceBlob = new FileBlobStoreContainer();
         destinationBlob = new FileBlobStoreContainer();
-        source = new SegmentNodeStoreContainer(sourceBlob);
-        destination = new SegmentNodeStoreContainer(destinationBlob);
+        source = new SegmentTarNodeStoreContainer(sourceBlob);
+        destination = new SegmentTarNodeStoreContainer(destinationBlob);
     }
 
     @Override
@@ -53,5 +55,10 @@ public class FbsToFbsTest extends AbstractOak2OakTest {
     protected String[] getArgs() {
         return new String[] { "--copy-binaries", "--src-fileblobstore", sourceBlob.getDescription(), "--fileblobstore",
                 destinationBlob.getDescription(), source.getDescription(), destination.getDescription() };
+    }
+
+    @Override
+    protected boolean supportsCheckpointMigration() {
+        return true;
     }
 }

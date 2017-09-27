@@ -70,7 +70,7 @@ public class TomcatIT extends TestCase {
         File repoDir = new File("target", "repository");
         FileUtils.deleteQuietly(repoDir);
 
-        url = new URL("http://localhost:12856/");
+        url = new URL("http://localhost:"+getPort()+"/");
 
         tomcat = new Tomcat();
         tomcat.setSilent(true);
@@ -124,9 +124,13 @@ public class TomcatIT extends TestCase {
     }
 
     protected void tearDown() throws Exception {
-        client.closeAllWindows();
+        client.close();
 
         tomcat.stop();
+    }
+
+    private static int getPort() {
+        return Integer.getInteger("tomcat.http.port", 12856);
     }
 
 }

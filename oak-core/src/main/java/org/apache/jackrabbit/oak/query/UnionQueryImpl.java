@@ -21,21 +21,21 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
-
 import org.apache.jackrabbit.oak.api.PropertyValue;
 import org.apache.jackrabbit.oak.api.Result;
 import org.apache.jackrabbit.oak.api.Result.SizePrecision;
 import org.apache.jackrabbit.oak.api.Tree;
+import org.apache.jackrabbit.oak.plugins.memory.PropertyValues;
+import org.apache.jackrabbit.oak.query.QueryImpl.MeasuringIterator;
 import org.apache.jackrabbit.oak.query.ast.ColumnImpl;
 import org.apache.jackrabbit.oak.query.ast.OrderingImpl;
-import org.apache.jackrabbit.oak.query.QueryImpl.MeasuringIterator;
-import org.apache.jackrabbit.oak.spi.query.PropertyValues;
+import org.apache.jackrabbit.oak.query.stats.QueryStatsData.QueryExecutionStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Maps;
 
 /**
  * Represents a union query.
@@ -117,6 +117,12 @@ public class UnionQueryImpl implements Query {
     public void setTraversalEnabled(boolean traversal) {
         left.setTraversalEnabled(traversal);
         right.setTraversalEnabled(traversal);
+    }
+    
+    @Override
+    public  void setQueryOptions(QueryOptions options) {
+        left.setQueryOptions(options);
+        right.setQueryOptions(options);
     }
 
     @Override
@@ -388,6 +394,22 @@ public class UnionQueryImpl implements Query {
     public boolean containsUnfilteredFullTextCondition() {
         return left.containsUnfilteredFullTextCondition() || 
                 right.containsUnfilteredFullTextCondition();
+    }
+
+    @Override
+    public boolean isPotentiallySlow() {
+        return left.isPotentiallySlow() || 
+                right.isPotentiallySlow();
+    }
+
+    @Override
+    public void verifyNotPotentiallySlow() {
+        left.verifyNotPotentiallySlow();
+        right.verifyNotPotentiallySlow();
+    }
+    
+    public QueryExecutionStats getQueryExecutionStats() {
+        return left.getQueryExecutionStats();
     }
 
 }

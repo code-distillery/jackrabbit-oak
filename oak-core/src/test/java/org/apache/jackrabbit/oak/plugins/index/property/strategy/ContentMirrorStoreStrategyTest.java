@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.plugins.index.property.strategy;
 
+import static com.google.common.base.Suppliers.memoize;
 import static com.google.common.collect.Sets.newHashSet;
 import static java.util.Arrays.asList;
 import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.ENTRY_COUNT_PROPERTY_NAME;
@@ -24,11 +25,12 @@ import static org.apache.jackrabbit.oak.plugins.index.IndexConstants.KEY_COUNT_P
 import static org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditor.COUNT_PROPERTY_NAME;
 import static org.apache.jackrabbit.oak.plugins.index.counter.NodeCounterEditor.DEFAULT_RESOLUTION;
 import static org.apache.jackrabbit.oak.plugins.memory.EmptyNodeState.EMPTY_NODE;
-import static org.apache.jackrabbit.oak.util.ApproximateCounter.COUNT_PROPERTY_PREFIX;
+import static org.apache.jackrabbit.oak.plugins.index.counter.ApproximateCounter.COUNT_PROPERTY_PREFIX;
 
 import java.util.Collections;
 import java.util.Set;
 
+import com.google.common.base.Supplier;
 import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
@@ -63,39 +65,40 @@ public class ContentMirrorStoreStrategyTest {
      * </ul>
      */
     @Test
-    public void testIndexPruning() {
+    public void testIndexPruning() throws CommitFailedException {
         IndexStoreStrategy store = new ContentMirrorStoreStrategy();
 
         NodeState root = EMPTY_NODE;
-        NodeBuilder index = root.builder();
+        NodeBuilder builder = root.builder();
+        Supplier<NodeBuilder> index = () -> builder;
 
         for (String path : asList("/", "a/b/c", "a/b/d", "b", "d/e", "d/e/f")) {
             store.update(index, path, null, null, EMPTY, KEY);
         }
-        checkPath(index, "key", "", true);
-        checkPath(index, "key", "a/b/c", true);
-        checkPath(index, "key", "a/b/d", true);
-        checkPath(index, "key", "b", true);
-        checkPath(index, "key", "d/e", true);
-        checkPath(index, "key", "d/e/f", true);
+        checkPath(builder, "key", "", true);
+        checkPath(builder, "key", "a/b/c", true);
+        checkPath(builder, "key", "a/b/d", true);
+        checkPath(builder, "key", "b", true);
+        checkPath(builder, "key", "d/e", true);
+        checkPath(builder, "key", "d/e/f", true);
 
         // remove the root key, removes just the "match" property, when the
         // index is not empty
         store.update(index, "/", null, null, KEY, EMPTY);
-        checkPath(index, "key", "d/e/f", true);
+        checkPath(builder, "key", "d/e/f", true);
 
         // removing intermediary path doesn't remove the entire subtree
         store.update(index, "d/e", null, null, KEY, EMPTY);
-        checkPath(index, "key", "d/e/f", true);
+        checkPath(builder, "key", "d/e/f", true);
 
         // removing intermediary path doesn't remove the entire subtree
         store.update(index, "d/e/f", null, null, KEY, EMPTY);
-        checkNotPath(index, "key", "d");
+        checkNotPath(builder, "key", "d");
 
         // brother segment removed
         store.update(index, "a/b/d", null, null, KEY, EMPTY);
         store.update(index, "a/b", null, null, KEY, EMPTY);
-        checkPath(index, "key", "a/b/c", true);
+        checkPath(builder, "key", "a/b/c", true);
 
         // reinsert root and remove everything else
         store.update(index, "", null, null, EMPTY, KEY);
@@ -105,7 +108,7 @@ public class ContentMirrorStoreStrategyTest {
 
         // remove the root key when the index is empty
         store.update(index, "", null, null, KEY, EMPTY);
-        Assert.assertEquals(0, index.getChildNodeCount(1));
+        Assert.assertEquals(0, builder.getChildNodeCount(1));
     }
 
     private static void checkPath(NodeBuilder node, String key, String path,
@@ -140,7 +143,7 @@ public class ContentMirrorStoreStrategyTest {
         IndexStoreStrategy store = new ContentMirrorStoreStrategy();
         NodeState root = EMPTY_NODE;
         NodeBuilder indexMeta = root.builder();
-        NodeBuilder index = indexMeta.child(INDEX_CONTENT_NODE_NAME);
+        Supplier<NodeBuilder> index = memoize(() -> indexMeta.child(INDEX_CONTENT_NODE_NAME));
         store.update(index, "a", null, null, EMPTY, KEY);
         store.update(index, "b", null, null, EMPTY, KEY);
         Assert.assertTrue(
@@ -211,7 +214,7 @@ public class ContentMirrorStoreStrategyTest {
         final long repoTreeApproxNodeCount = 50000;
         final long repoSubPathApproxNodeCount = repoTreeApproxNodeCount /
                 filteredNodeFactor;
-        final FilterImpl filter = new FilterImpl();
+        final FilterImpl filter = FilterImpl.newTestInstance();
         filter.restrictPath("/" + subPathName,
                 Filter.PathRestriction.ALL_CHILDREN);
 
@@ -244,18 +247,16 @@ public class ContentMirrorStoreStrategyTest {
         assertInRange(
                 "Approximate count not used for is-not-null query",
                 approxNodeCount,
-                filteredNodeFactor *
-                        store.count(filter, root, indexMeta.getNodeState(),
-                                null, maxTraversal));
+                store.count(filter, root, indexMeta.getNodeState(),
+                            null, maxTraversal));
 
         // prop=value query without entryCount
         key.setProperty(approxPropName, approxKeyCount, Type.LONG);
         assertInRange(
                 "Approximate count not used for key=value query",
                 approxKeyCount,
-                filteredNodeFactor *
-                        store.count(filter, root, indexMeta.getNodeState(),
-                                KEY, maxTraversal));
+                store.count(filter, root, indexMeta.getNodeState(),
+                            KEY, maxTraversal));
 
         // is-not-null query with entryCount
         indexMeta
@@ -284,10 +285,10 @@ public class ContentMirrorStoreStrategyTest {
     }
 
     private static void assertInRange(String msg, double expected, double actual) {
-        final double allowedError = 0.1;
-
+        double allowedError = 0.1;
         double diff = Math.abs(expected - actual);
-        Assert.assertTrue(msg, diff < expected * allowedError);
+        Assert.assertTrue(msg + "; expected about " + expected + ", got " + actual, 
+                diff < expected * allowedError);
     }
 
 }

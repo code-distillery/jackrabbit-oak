@@ -21,6 +21,8 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 
+import org.apache.commons.lang.StringUtils;
+import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,9 +32,11 @@ public class MigrationOptions {
 
     private static final DateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd");
 
-    private final boolean copyBinariesByReference;
+    private static final boolean ADD_SECONDARY_METADATA = Boolean.getBoolean("oak.upgrade.addSecondaryMetadata");
 
-    private final boolean mmap;
+    private final boolean copyBinaries;
+
+    private final boolean disableMmap;
 
     private final int cacheSizeInMB;
 
@@ -44,7 +48,13 @@ public class MigrationOptions {
 
     private final String[] excludePaths;
 
+    private final String[] fragmentPaths;
+
+    private final String[] excludeFragments;
+
     private final String[] mergePaths;
+
+    private final boolean includeIndex;
 
     private final boolean failOnError;
 
@@ -52,9 +62,47 @@ public class MigrationOptions {
 
     private final boolean skipInitialization;
 
-    public MigrationOptions(MigrationCliArguments args) {
-        this.copyBinariesByReference = !args.hasOption(OptionParserFactory.COPY_BINARIES);
-        this.mmap = args.hasOption(OptionParserFactory.MMAP);
+    private final boolean skipNameCheck;
+
+    private final boolean ignoreMissingBinaries;
+
+    private final boolean verify;
+
+    private final boolean onlyVerify;
+
+    private final boolean skipCheckpoints;
+
+    private final boolean forceCheckpoints;
+
+    private final String srcUser;
+
+    private final String srcPassword;
+
+    private final String dstUser;
+
+    private final String dstPassword;
+
+    private final String srcFbs;
+
+    private final String srcFds;
+
+    private final String srcS3Config;
+
+    private final String srcS3;
+
+    private final String dstFbs;
+
+    private final String dstFds;
+
+    private final String dstS3Config;
+
+    private final String dstS3;
+
+    private final Boolean srcExternalBlobs;
+
+    public MigrationOptions(MigrationCliArguments args) throws CliArgumentException {
+        this.disableMmap = args.hasOption(OptionParserFactory.DISABLE_MMAP);
+        this.copyBinaries = args.hasOption(OptionParserFactory.COPY_BINARIES);
         if (args.hasOption(OptionParserFactory.CACHE_SIZE)) {
             this.cacheSizeInMB = args.getIntOption(OptionParserFactory.CACHE_SIZE);
         } else {
@@ -73,21 +121,50 @@ public class MigrationOptions {
         } else {
             this.copyOrphanedVersions = epoch;
         }
-        this.includePaths = split(args.getOption(OptionParserFactory.INCLUDE_PATHS));
-        this.excludePaths = split(args.getOption(OptionParserFactory.EXCLUDE_PATHS));
-        this.mergePaths = split(args.getOption(OptionParserFactory.MERGE_PATHS));
+        this.includePaths = checkPaths(args.getOptionList(OptionParserFactory.INCLUDE_PATHS));
+        this.excludePaths = checkPaths(args.getOptionList(OptionParserFactory.EXCLUDE_PATHS));
+        this.fragmentPaths = checkPaths(args.getOptionList(OptionParserFactory.FRAGMENT_PATHS));
+        this.excludeFragments = args.getOptionList(OptionParserFactory.EXCLUDE_FRAGMENTS);
+        this.mergePaths = checkPaths(args.getOptionList(OptionParserFactory.MERGE_PATHS));
+        this.includeIndex = args.hasOption(OptionParserFactory.INCLUDE_INDEX);
         this.failOnError = args.hasOption(OptionParserFactory.FAIL_ON_ERROR);
         this.earlyShutdown = args.hasOption(OptionParserFactory.EARLY_SHUTDOWN);
         this.skipInitialization = args.hasOption(OptionParserFactory.SKIP_INIT);
-        logOptions();
+        this.skipNameCheck = args.hasOption(OptionParserFactory.SKIP_NAME_CHECK);
+        this.ignoreMissingBinaries = args.hasOption(OptionParserFactory.IGNORE_MISSING_BINARIES);
+        this.verify = args.hasOption(OptionParserFactory.VERIFY);
+        this.onlyVerify = args.hasOption(OptionParserFactory.ONLY_VERIFY);
+        this.skipCheckpoints = args.hasOption(OptionParserFactory.SKIP_CHECKPOINTS);
+        this.forceCheckpoints = args.hasOption(OptionParserFactory.FORCE_CHECKPOINTS);
+
+        this.srcUser = args.getOption(OptionParserFactory.SRC_USER);
+        this.srcPassword = args.getOption(OptionParserFactory.SRC_USER);
+        this.dstUser = args.getOption(OptionParserFactory.DST_USER);
+        this.dstPassword = args.getOption(OptionParserFactory.DST_PASSWORD);
+
+        this.srcFbs = args.getOption(OptionParserFactory.SRC_FBS);
+        this.srcFds = args.getOption(OptionParserFactory.SRC_FDS);
+        this.srcS3 = args.getOption(OptionParserFactory.SRC_S3);
+        this.srcS3Config = args.getOption(OptionParserFactory.SRC_S3_CONFIG);
+
+        this.dstFbs = args.getOption(OptionParserFactory.DST_FBS);
+        this.dstFds = args.getOption(OptionParserFactory.DST_FDS);
+        this.dstS3 = args.getOption(OptionParserFactory.DST_S3);
+        this.dstS3Config = args.getOption(OptionParserFactory.DST_S3_CONFIG);
+
+        if (args.hasOption(OptionParserFactory.SRC_EXTERNAL_BLOBS)) {
+            this.srcExternalBlobs = args.getBooleanOption(OptionParserFactory.SRC_EXTERNAL_BLOBS);
+        } else {
+            this.srcExternalBlobs = null;
+        }
     }
 
-    public boolean isCopyBinariesByReference() {
-        return copyBinariesByReference;
+    public boolean isCopyBinaries() {
+        return copyBinaries;
     }
 
-    public boolean isMmap() {
-        return mmap;
+    public boolean isDisableMmap() {
+        return disableMmap;
     }
 
     public int getCacheSizeInMB() {
@@ -110,6 +187,14 @@ public class MigrationOptions {
         return excludePaths;
     }
 
+    public String[] getFragmentPaths() {
+        return fragmentPaths;
+    }
+
+    public String[] getExcludeFragments() {
+        return excludeFragments;
+    }
+
     public String[] getMergePaths() {
         return mergePaths;
     }
@@ -126,15 +211,119 @@ public class MigrationOptions {
         return skipInitialization;
     }
 
-    private void logOptions() {
-        if (copyBinariesByReference) {
-            log.info("DataStore needs to be shared with new repository");
-        } else {
-            log.info("Binary content would be copied to the NodeStore.");
-        }
+    public boolean isSkipNameCheck() {
+        return skipNameCheck;
+    }
 
-        if (mmap) {
-            log.info("Enabling memory mapped file access for Segment Store");
+    public boolean isIncludeIndex() {
+        return includeIndex;
+    }
+
+    public boolean isIgnoreMissingBinaries() {
+        return ignoreMissingBinaries;
+    }
+
+    public boolean isVerify() {
+        return verify;
+    }
+
+    public boolean isOnlyVerify() {
+        return onlyVerify;
+    }
+
+    public boolean isSkipCheckpoints() {
+        return skipCheckpoints;
+    }
+
+    public boolean isForceCheckpoints() {
+        return forceCheckpoints;
+    }
+
+    public boolean isAddSecondaryMetadata() { return ADD_SECONDARY_METADATA; }
+
+    public String getSrcUser() {
+        return srcUser;
+    }
+
+    public String getSrcPassword() {
+        return srcPassword;
+    }
+
+    public String getDstUser() {
+        return dstUser;
+    }
+
+    public String getDstPassword() {
+        return dstPassword;
+    }
+
+    public String getSrcFbs() {
+        return srcFbs;
+    }
+
+    public String getSrcFds() {
+        return srcFds;
+    }
+
+    public String getSrcS3Config() {
+        return srcS3Config;
+    }
+
+    public String getSrcS3() {
+        return srcS3;
+    }
+
+    public String getDstFbs() {
+        return dstFbs;
+    }
+
+    public String getDstFds() {
+        return dstFds;
+    }
+
+    public String getDstS3Config() {
+        return dstS3Config;
+    }
+
+    public String getDstS3() {
+        return dstS3;
+    }
+
+    public boolean isSrcFds() {
+        return StringUtils.isNotBlank(srcFds);
+    }
+
+    public boolean isSrcFbs() {
+        return StringUtils.isNotBlank(srcFbs);
+    }
+
+    public boolean isSrcS3() {
+        return StringUtils.isNotBlank(srcS3) && StringUtils.isNotBlank(srcS3Config);
+    }
+
+    public boolean isDstFds() {
+        return StringUtils.isNotBlank(dstFds);
+    }
+
+    public boolean isDstFbs() {
+        return StringUtils.isNotBlank(dstFbs);
+    }
+
+    public boolean isDstS3() {
+        return StringUtils.isNotBlank(dstS3) && StringUtils.isNotBlank(dstS3Config);
+    }
+
+    public boolean isSrcBlobStoreDefined() {
+        return isSrcFbs() || isSrcFds() || isSrcS3();
+    }
+
+    public boolean isDstBlobStoreDefined() {
+        return isDstFbs() || isDstFds() || isDstS3();
+    }
+
+    public void logOptions() {
+        if (disableMmap) {
+            log.info("Disabling memory mapped file access for Segment Store");
         }
 
         if (copyVersions == null) {
@@ -157,6 +346,14 @@ public class MigrationOptions {
             log.info("paths to exclude: {}", (Object) excludePaths);
         }
 
+        if (fragmentPaths != null) {
+            log.info("paths supporting fragments: {}", (Object) fragmentPaths);
+        }
+
+        if (excludeFragments != null) {
+            log.info("fragments to exclude: {}", (Object) excludeFragments);
+        }
+
         if (failOnError) {
             log.info("Unreadable nodes will cause failure of the entire transaction");
         }
@@ -169,16 +366,36 @@ public class MigrationOptions {
             log.info("The repository initialization will be skipped");
         }
 
+        if (skipNameCheck) {
+            log.info("Test for long-named nodes will be disabled");
+        }
+
+        if (includeIndex) {
+            log.info("Index data for the paths {} will be copied", (Object) includePaths);
+        }
+
+        if (ignoreMissingBinaries) {
+            log.info("Missing binaries won't break the migration");
+        }
+
+        if (srcExternalBlobs != null) {
+            log.info("Source DataStore external blobs: {}", srcExternalBlobs);
+        }
+
+        if (skipCheckpoints) {
+            log.info("Checkpoints won't be migrated");
+        }
+
+        if (forceCheckpoints) {
+            log.info("Checkpoints will be migrated even with the custom paths specified");
+        }
+
+        if (ADD_SECONDARY_METADATA) {
+            log.info("Secondary metadata will be added");
+        }
+
         log.info("Cache size: {} MB", cacheSizeInMB);
 
-    }
-
-    private static String[] split(String list) {
-        if (list == null) {
-            return null;
-        } else {
-            return list.split(",");
-        }
     }
 
     private static Calendar parseVersionCopyArgument(String string) {
@@ -198,6 +415,22 @@ public class MigrationOptions {
             calendar = null;
         }
         return calendar;
+    }
+
+    public Boolean getSrcExternalBlobs() {
+        return srcExternalBlobs;
+    }
+
+    private static String[] checkPaths(String[] paths) throws CliArgumentException {
+        if (paths == null) {
+            return paths;
+        }
+        for (String p : paths) {
+            if (!PathUtils.isValid(p)) {
+                throw new CliArgumentException("Following path is not valid: " + p, 1);
+            }
+        }
+        return paths;
     }
 
 }

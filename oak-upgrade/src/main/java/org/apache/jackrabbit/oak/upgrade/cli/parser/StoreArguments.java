@@ -23,28 +23,15 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.apache.jackrabbit.oak.plugins.segment.SegmentVersion;
-import org.apache.jackrabbit.oak.upgrade.cli.blob.BlobStoreFactory;
-import org.apache.jackrabbit.oak.upgrade.cli.blob.DummyBlobStoreFactory;
-import org.apache.jackrabbit.oak.upgrade.cli.blob.FileBlobStoreFactory;
-import org.apache.jackrabbit.oak.upgrade.cli.blob.FileDataStoreFactory;
-import org.apache.jackrabbit.oak.upgrade.cli.blob.S3DataStoreFactory;
 import org.apache.jackrabbit.oak.upgrade.cli.node.StoreFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.SRC_FBS;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.SRC_FDS;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.SRC_S3;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.SRC_S3_CONFIG;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.DST_FBS;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.DST_FDS;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.DST_S3;
-import static org.apache.jackrabbit.oak.upgrade.cli.parser.OptionParserFactory.DST_S3_CONFIG;
 
 import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.JCR2_DIR;
 import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.JCR2_DIR_XML;
 import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.JCR2_XML;
 import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.SEGMENT;
+import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.SEGMENT_TAR;
 import static org.apache.jackrabbit.oak.upgrade.cli.parser.StoreType.getMatchingType;
 
 public class StoreArguments {
@@ -53,22 +40,31 @@ public class StoreArguments {
 
     private static final String REPOSITORY_XML = "repository.xml";
 
+    public static final String SEGMENT_OLD_PREFIX = "segment-old:";
+
     private static final Logger log = LoggerFactory.getLogger(StoreArguments.class);
 
-    private final MigrationCliArguments parser;
+    private final MigrationOptions options;
 
     private final StoreDescriptor src;
 
     private final StoreDescriptor dst;
 
-    public StoreArguments(MigrationCliArguments parser) throws CliArgumentException {
-        this.parser = parser;
+    private Boolean srcHasExternalBlobRefs;
 
-        List<StoreDescriptor> descriptors = createStoreDescriptors(parser.getArguments());
+    public StoreArguments(MigrationOptions options, List<String> arguments) throws CliArgumentException {
+        this.options = options;
+        List<StoreDescriptor> descriptors = createStoreDescriptors(arguments, options);
 
         src = descriptors.get(0);
         dst = descriptors.get(1);
 
+        if (options.getSrcExternalBlobs() != null) {
+            srcHasExternalBlobRefs = options.getSrcExternalBlobs();
+        }
+    }
+
+    public void logOptions() {
         log.info("Source: {}", src);
         log.info("Destination: {}", dst);
 
@@ -78,63 +74,52 @@ public class StoreArguments {
     }
 
     public StoreFactory getSrcStore() {
-        return src.getFactory(MigrationDirection.SRC, parser);
+        return src.getFactory(MigrationDirection.SRC, options);
     }
 
     public StoreFactory getDstStore() {
-        return dst.getFactory(MigrationDirection.DST, parser);
+        return dst.getFactory(MigrationDirection.DST, options);
     }
 
-    public BlobStoreFactory getSrcBlobStore() throws IOException {
-        BlobStoreFactory factory;
-        if (parser.hasOption(SRC_FBS)) {
-            factory = new FileBlobStoreFactory(parser.getOption(SRC_FBS));
-        } else if (parser.hasOption(SRC_S3_CONFIG) && parser.hasOption(SRC_S3)) {
-            factory = new S3DataStoreFactory(parser.getOption(SRC_S3_CONFIG), parser.getOption(SRC_S3));
-        } else if (parser.hasOption(SRC_FDS)) {
-            factory = new FileDataStoreFactory(parser.getOption(SRC_FDS));
-        } else {
-            factory = new DummyBlobStoreFactory();
-        }
-        log.info("Source blob store: {}", factory);
-        return factory;
+    public StoreType getSrcType() {
+        return src.getType();
     }
 
-    public BlobStoreFactory getDstBlobStore() throws IOException {
-        BlobStoreFactory factory;
-        if (parser.hasOption(DST_FBS)) {
-            factory = new FileBlobStoreFactory(parser.getOption(DST_FBS));
-        } else if (parser.hasOption(DST_S3_CONFIG) && parser.hasOption(DST_S3)) {
-            factory = new S3DataStoreFactory(parser.getOption(DST_S3_CONFIG), parser.getOption(DST_S3));
-        } else if (parser.hasOption(DST_FDS)) {
-            factory = new FileDataStoreFactory(parser.getOption(DST_FDS));
-        } else {
-            factory = new DummyBlobStoreFactory();
-        }
-        log.info("Destination blob store: {}", factory);
-        return factory;
+    public StoreType getDstType() {
+        return dst.getType();
+    }
+
+    String getSrcDescriptor() {
+        return src.toString();
+    }
+
+    String getDstDescriptor() {
+        return dst.toString();
     }
 
     public boolean isInPlaceUpgrade() {
-        if (src.getType() == JCR2_DIR_XML && dst.getType() == SEGMENT) {
+        if (src.getType() == JCR2_DIR_XML && dst.getType() == SEGMENT_TAR) {
             return src.getPath().equals(dst.getPath());
         }
         return false;
-    }
-
-    public boolean isSkipLongNames() {
-        return dst.getType() != SEGMENT;
     }
 
     public String[] getSrcPaths() {
         return src.getPaths();
     }
 
-    private static List<StoreDescriptor> createStoreDescriptors(List<String> arguments) throws CliArgumentException {
+    public boolean srcUsesEmbeddedDatastore() throws IOException {
+        if (srcHasExternalBlobRefs == null) {
+            srcHasExternalBlobRefs = src.getFactory(StoreArguments.MigrationDirection.SRC, options).hasExternalBlobReferences();
+        }
+        return !srcHasExternalBlobRefs;
+    }
+
+    private static List<StoreDescriptor> createStoreDescriptors(List<String> arguments, MigrationOptions options) throws CliArgumentException {
         List<StoreDescriptor> descriptors = mapToStoreDescriptors(arguments);
         mergeCrx2Descriptors(descriptors);
         addSegmentAsDestination(descriptors);
-        validateDescriptors(descriptors);
+        validateDescriptors(descriptors, options);
         return descriptors;
     }
 
@@ -146,7 +131,7 @@ public class StoreArguments {
             StoreType type = getMatchingType(argument);
             if (type == JCR2_DIR) {
                 if (jcr2Dir) {
-                    type = SEGMENT;
+                    type = SEGMENT_TAR;
                 }
                 jcr2Dir = true;
             }
@@ -204,19 +189,27 @@ public class StoreArguments {
             StoreType type = descriptors.get(0).getType();
             if (type == JCR2_DIR_XML) {
                 String crx2Dir = descriptors.get(0).getPath();
-                descriptors.add(new StoreDescriptor(SEGMENT, crx2Dir));
+                descriptors.add(new StoreDescriptor(SEGMENT_TAR, crx2Dir));
                 log.info("In place migration between JCR2 and SegmentNodeStore in {}", crx2Dir);
             }
         }
     }
 
-    private static void validateDescriptors(List<StoreDescriptor> descriptors) throws CliArgumentException {
+    private static void validateDescriptors(List<StoreDescriptor> descriptors, MigrationOptions options) throws CliArgumentException {
         if (descriptors.size() < 2) {
             throw new CliArgumentException("Not enough node store arguments: " + descriptors.toString(), 1);
         } else if (descriptors.size() > 2) {
             throw new CliArgumentException("Too much node store arguments: " + descriptors.toString(), 1);
         } else if (descriptors.get(1).getType() == JCR2_DIR_XML) {
             throw new CliArgumentException("Can't use CRX2 as a destination", 1);
+        }
+        StoreDescriptor src = descriptors.get(0);
+        StoreDescriptor dst = descriptors.get(1);
+        if (src.getType() == dst.getType() && src.getPath().equals(dst.getPath())) {
+            throw new CliArgumentException("The source and the destination is the same repository.", 1);
+        }
+        if (src.getType() == StoreType.JCR2_DIR_XML && options.isSrcBlobStoreDefined()) {
+            throw new CliArgumentException("The --src-datastore can't be used for the repository upgrade. Source datastore configuration is placed in the repository.xml file.", 1);
         }
     }
 
@@ -257,8 +250,8 @@ public class StoreArguments {
             return type;
         }
 
-        public StoreFactory getFactory(MigrationDirection direction, MigrationCliArguments arguments) {
-            return type.createFactory(paths, direction, arguments);
+        public StoreFactory getFactory(MigrationDirection direction, MigrationOptions options) {
+            return type.createFactory(paths, direction, options);
         }
 
         @Override
@@ -269,5 +262,6 @@ public class StoreArguments {
                 return String.format("%s%s", type, Arrays.toString(getPaths()));
             }
         }
+
     }
 }
