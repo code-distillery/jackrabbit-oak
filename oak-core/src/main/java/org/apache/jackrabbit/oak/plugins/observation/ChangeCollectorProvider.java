@@ -31,6 +31,8 @@ import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.EditorProvider;
 import org.apache.jackrabbit.oak.spi.commit.Validator;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
+import org.apache.jackrabbit.oak.spi.observation.ChangeSet;
+import org.apache.jackrabbit.oak.spi.observation.ChangeSetBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
@@ -202,7 +204,7 @@ public class ChangeCollectorProvider extends ValidatorProvider {
             // CommitContext of the CommitInfo
             CommitContext commitContext = (CommitContext) support.info.getInfo().get(CommitContext.NAME);
             ChangeSet changeSet = support.changeSetBuilder.build();
-            commitContext.set(COMMIT_CONTEXT_OBSERVATION_CHANGESET, changeSet);
+            commitContext.set(ChangeSet.COMMIT_CONTEXT_OBSERVATION_CHANGESET, changeSet);
             LOG.debug("Collected changeSet for commit {} is {}", support.info, changeSet);
         }
 

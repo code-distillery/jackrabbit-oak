@@ -34,6 +34,7 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.IndexingQueue;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LocalIndexWriterFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.hybrid.LuceneDocumentHolder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.DefaultIndexWriterFactory;
+import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterConfig;
 import org.apache.jackrabbit.oak.plugins.index.lucene.writer.LuceneIndexWriterFactory;
 import org.apache.jackrabbit.oak.spi.blob.GarbageCollectableBlobStore;
 import org.apache.jackrabbit.oak.spi.commit.CommitContext;
@@ -62,13 +63,13 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
     private final IndexCopier indexCopier;
     private final ExtractedTextCache extractedTextCache;
     private final IndexAugmentorFactory augmentorFactory;
-    private LuceneIndexWriterFactory indexWriterFactory;
     private final IndexTracker indexTracker;
     private final MountInfoProvider mountInfoProvider;
     private final ActiveDeletedBlobCollector activeDeletedBlobCollector;
     private GarbageCollectableBlobStore blobStore;
     private IndexingQueue indexingQueue;
     private boolean nrtIndexingEnabled;
+    private LuceneIndexWriterConfig writerConfig = new LuceneIndexWriterConfig();
 
     /**
      * Number of indexed Lucene document that can be held in memory
@@ -131,8 +132,7 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
             IndexingContext indexingContext = ((ContextAwareCallback)callback).getIndexingContext();
             BlobDeletionCallback blobDeletionCallback = activeDeletedBlobCollector.getBlobDeletionCallback();
             indexingContext.registerIndexCommitCallback(blobDeletionCallback);
-            indexWriterFactory = new DefaultIndexWriterFactory(mountInfoProvider, newDirectoryFactory(blobDeletionCallback));
-            LuceneIndexWriterFactory writerFactory = indexWriterFactory;
+            LuceneIndexWriterFactory writerFactory = null;
             IndexDefinition indexDefinition = null;
             boolean asyncIndexing = true;
             if (nrtIndexingEnabled() && !indexingContext.isAsync() && IndexDefinition.supportsSyncOrNRTIndexing(definition)) {
@@ -180,6 +180,10 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
                 asyncIndexing = false;
             }
 
+            if (writerFactory == null) {
+                writerFactory = new DefaultIndexWriterFactory(mountInfoProvider, newDirectoryFactory(blobDeletionCallback), writerConfig);
+            }
+
             LuceneIndexEditorContext context = new LuceneIndexEditorContext(root, definition, indexDefinition, callback,
                     writerFactory, extractedTextCache, augmentorFactory, indexingContext, asyncIndexing);
             return new LuceneIndexEditor(context);
@@ -223,6 +227,10 @@ public class LuceneIndexEditorProvider implements IndexEditorProvider {
     public void setIndexingQueue(IndexingQueue indexingQueue) {
         this.indexingQueue = indexingQueue;
         this.nrtIndexingEnabled = indexingQueue != null;
+    }
+
+    public void setWriterConfig(LuceneIndexWriterConfig writerConfig) {
+        this.writerConfig = writerConfig;
     }
 
     GarbageCollectableBlobStore getBlobStore() {

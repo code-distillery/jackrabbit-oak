@@ -22,6 +22,7 @@ import static com.google.common.base.Preconditions.checkState;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -56,7 +57,7 @@ public class IndexNodeManager {
      */
     static final String ASYNC = ":async";
 
-    private static final AtomicInteger INDEX_NODE_COUNTER = new AtomicInteger();
+    private static final AtomicInteger SEARCHER_ID_COUNTER = new AtomicInteger();
 
     private static final PerfLogger PERF_LOGGER =
             new PerfLogger(LoggerFactory.getLogger(IndexNodeManager.class.getName() + ".perf"));
@@ -93,16 +94,22 @@ public class IndexNodeManager {
 
     private final ReaderRefreshPolicy refreshPolicy;
 
+    private final Semaphore refreshLock = new Semaphore(1);
+
     private final Runnable refreshCallback = new Runnable() {
         @Override
         public void run() {
-            refreshReaders();
+            if (refreshLock.tryAcquire()) {
+                try {
+                    refreshReaders();
+                }finally {
+                    refreshLock.release();
+                }
+            }
         }
     };
 
     private boolean closed = false;
-
-    private final int indexNodeId = INDEX_NODE_COUNTER.incrementAndGet();
 
     IndexNodeManager(String name, IndexDefinition definition, List<LuceneIndexReader> readers, @Nullable NRTIndex nrtIndex)
             throws IOException {
@@ -143,8 +150,16 @@ public class IndexNodeManager {
             boolean success = false;
             try {
                 refreshPolicy.refreshOnReadIfRequired(refreshCallback);
+                SearcherHolder local = searcherHolder;
+                int tryCount = 0;
+                while (!local.searcher.getIndexReader().tryIncRef()) {
+                    checkState(++tryCount < 10, "Not able to " +
+                            "get open searcher in %s attempts", tryCount);
+                    local = searcherHolder;
+                }
+                IndexNode indexNode = new IndexNodeImpl(local);
                 success = true;
-                return new IndexNodeImpl(searcherHolder);
+                return indexNode;
             } finally {
                 if (!success) {
                     lock.readLock().unlock();
@@ -155,10 +170,6 @@ public class IndexNodeManager {
 
     private void release() {
         lock.readLock().unlock();
-    }
-
-    private int getIndexNodeId() {
-        return indexNodeId;
     }
 
     void close() throws IOException {
@@ -250,10 +261,6 @@ public class IndexNodeManager {
         decrementSearcherUsageCount(holder.searcher);
     }
 
-    private static void incrementSearcherUsageCount(IndexSearcher searcher) {
-        searcher.getIndexReader().incRef();
-    }
-
     private void decrementSearcherUsageCount(IndexSearcher searcher) {
         try {
             //Decrement the count by 1 as we increased it while creating the searcher
@@ -267,6 +274,7 @@ public class IndexNodeManager {
     private static class SearcherHolder {
         final IndexSearcher searcher;
         final List<LuceneIndexReader> nrtReaders;
+        final int searcherId = SEARCHER_ID_COUNTER.incrementAndGet();
 
         public SearcherHolder(IndexSearcher searcher, List<LuceneIndexReader> nrtReaders) {
             this.searcher = searcher;
@@ -280,16 +288,17 @@ public class IndexNodeManager {
 
         private IndexNodeImpl(SearcherHolder searcherHolder) {
             this.holder = searcherHolder;
-            //Increment on each acquire
-            incrementSearcherUsageCount(holder.searcher);
         }
 
         @Override
         public void release() {
             if (released.compareAndSet(false, true)) {
-                //Decrement on each release
-                decrementSearcherUsageCount(holder.searcher);
-                IndexNodeManager.this.release();
+                try {
+                    //Decrement on each release
+                    decrementSearcherUsageCount(holder.searcher);
+                } finally {
+                    IndexNodeManager.this.release();
+                }
             }
         }
 
@@ -325,7 +334,7 @@ public class IndexNodeManager {
 
         @Override
         public int getIndexNodeId() {
-            return IndexNodeManager.this.getIndexNodeId();
+            return holder.searcherId;
         }
 
         @Override

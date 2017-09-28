@@ -16,6 +16,7 @@
  */
 package org.apache.jackrabbit.oak.composite;
 
+import com.google.common.io.Closer;
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.ConfigurationPolicy;
@@ -25,6 +26,7 @@ import org.apache.felix.scr.annotations.PropertyUnbounded;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.ReferenceCardinality;
 import org.apache.felix.scr.annotations.ReferencePolicy;
+import org.apache.jackrabbit.oak.api.CommitFailedException;
 import org.apache.jackrabbit.oak.api.jmx.CheckpointMBean;
 import org.apache.jackrabbit.oak.commons.PropertiesUtil;
 import org.apache.jackrabbit.oak.composite.checks.NodeStoreChecks;
@@ -36,12 +38,15 @@ import org.apache.jackrabbit.oak.spi.state.NodeStore;
 import org.apache.jackrabbit.oak.spi.state.NodeStoreProvider;
 import org.apache.jackrabbit.oak.spi.whiteboard.Registration;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
+import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.component.ComponentContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Dictionary;
 import java.util.HashSet;
@@ -52,7 +57,6 @@ import java.util.Map;
 import java.util.Set;
 
 import static com.google.common.collect.Sets.newIdentityHashSet;
-import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerMBean;
 
 @Component(policy = ConfigurationPolicy.REQUIRE)
 public class CompositeNodeStoreService {
@@ -72,6 +76,9 @@ public class CompositeNodeStoreService {
     @Reference
     private NodeStoreChecks checks;
 
+    @Reference
+    private StatisticsProvider statisticsProvider = StatisticsProvider.NOOP;
+
     @Property(label = "Ignore read only writes",
             unbounded = PropertyUnbounded.ARRAY,
             description = "Writes to these read-only paths won't fail the commit"
@@ -84,13 +91,24 @@ public class CompositeNodeStoreService {
     )
     private static final String PROP_PARTIAL_READ_ONLY = "partialReadOnly";
 
+    @Property(label = "Pre-populate seed mount",
+            description = "Setting this parameter to a mount name will enable pre-populating the empty default store"
+    )
+    private static final String PROP_SEED_MOUNT = "seedMount";
+
+    @Property(label = "Gather path statistics",
+            description = "Whether the CompositeNodeStoreStatsMBean should gather information about the most popular paths (may be expensive)",
+            boolValue = false
+    )
+    private static final String PATH_STATS = "pathStats";
+
     private ComponentContext context;
 
     private Set<NodeStoreProvider> nodeStoresInUse = newIdentityHashSet();
 
     private ServiceRegistration nsReg;
 
-    private Registration checkpointReg;
+    private Closer mbeanRegistrations;
 
     private ObserverTracker observerTracker;
 
@@ -98,20 +116,26 @@ public class CompositeNodeStoreService {
 
     private boolean partialReadOnly;
 
+    private String seedMount;
+
+    private boolean pathStats;
+
     @Activate
-    protected void activate(ComponentContext context, Map<String, ?> config) {
+    protected void activate(ComponentContext context, Map<String, ?> config) throws IOException, CommitFailedException {
         this.context = context;
         ignoreReadOnlyWritePaths = PropertiesUtil.toStringArray(config.get(PROP_IGNORE_READ_ONLY_WRITES), new String[0]);
         partialReadOnly = PropertiesUtil.toBoolean(config.get(PROP_PARTIAL_READ_ONLY), true);
+        seedMount = PropertiesUtil.toString(config.get(PROP_SEED_MOUNT), null);
+        pathStats = PropertiesUtil.toBoolean(config.get(PATH_STATS), false);
         registerCompositeNodeStore();
     }
 
     @Deactivate
-    protected void deactivate() {
+    protected void deactivate() throws IOException {
         unregisterCompositeNodeStore();
     }
 
-    private void registerCompositeNodeStore() {
+    private void registerCompositeNodeStore() throws IOException, CommitFailedException {
         if (nsReg != null) {
             return; // already registered
         }
@@ -155,12 +179,22 @@ public class CompositeNodeStoreService {
                 continue;
             }
             String mountName = getMountName(ns);
-            if (mountName != null) {
-                builder.addMount(mountName, ns.getNodeStoreProvider().getNodeStore());
-                LOG.info("Mounting {} as {}", ns.getDescription(), mountName);
-                nodeStoresInUse.add(ns.getNodeStoreProvider());
+            if (mountName == null) {
+                continue;
+            }
+
+            builder.addMount(mountName, ns.getNodeStoreProvider().getNodeStore());
+            LOG.info("Mounting {} as {}", ns.getDescription(), mountName);
+            nodeStoresInUse.add(ns.getNodeStoreProvider());
+
+            if (mountName.equals(seedMount)) {
+                new InitialContentMigrator(globalNs.nodeStore.getNodeStore(), ns.getNodeStoreProvider().getNodeStore(), mountInfoProvider.getMountByName(seedMount)).migrate();
             }
         }
+
+        CompositeNodeStoreStats nodeStateStats = new CompositeNodeStoreStats(statisticsProvider, "NODE_STATE", pathStats);
+        CompositeNodeStoreStats nodeBuilderStats = new CompositeNodeStoreStats(statisticsProvider, "NODE_BUILDER", pathStats);
+        builder.with(nodeStateStats, nodeBuilderStats);
 
         Dictionary<String, Object> props = new Hashtable<String, Object>();
         props.put(Constants.SERVICE_PID, CompositeNodeStore.class.getName());
@@ -172,11 +206,23 @@ public class CompositeNodeStoreService {
         observerTracker.start(context.getBundleContext());
 
         Whiteboard whiteboard = new OsgiWhiteboard(context.getBundleContext());
-        checkpointReg = registerMBean(whiteboard,
+
+        mbeanRegistrations = Closer.create();
+        registerMBean(whiteboard,
                 CheckpointMBean.class,
                 new CompositeCheckpointMBean(store),
                 CheckpointMBean.TYPE,
                 "Composite node store checkpoint management");
+        registerMBean(whiteboard,
+                CompositeNodeStoreStatsMBean.class,
+                nodeStateStats,
+                CompositeNodeStoreStatsMBean.TYPE,
+                "Composite node store statistics (node state)");
+        registerMBean(whiteboard,
+                CompositeNodeStoreStatsMBean.class,
+                nodeBuilderStats,
+                CompositeNodeStoreStatsMBean.TYPE,
+                "Composite node store statistics (node builder)");
 
         LOG.info("Registering the composite node store");
         nsReg = context.getBundleContext().registerService(
@@ -185,6 +231,12 @@ public class CompositeNodeStoreService {
                 },
                 store,
                 props);
+    }
+
+    private <T> void registerMBean(Whiteboard whiteboard,
+                          Class<T> iface, T bean, String type, String name) {
+        Registration reg = WhiteboardUtils.registerMBean(whiteboard, iface, bean, type, name);
+        mbeanRegistrations.register(() -> reg.unregister());
     }
 
     private boolean isGlobalNodeStore(NodeStoreWithProps ns) {
@@ -202,15 +254,15 @@ public class CompositeNodeStoreService {
         return role.substring(MOUNT_ROLE_PREFIX.length());
     }
 
-    private void unregisterCompositeNodeStore() {
+    private void unregisterCompositeNodeStore() throws IOException {
         if (nsReg != null) {
             LOG.info("Unregistering the composite node store");
             nsReg.unregister();
             nsReg = null;
         }
-        if (checkpointReg != null) {
-            checkpointReg.unregister();
-            checkpointReg = null;
+        if (mbeanRegistrations != null) {
+            mbeanRegistrations.close();
+            mbeanRegistrations = null;
         }
         if (observerTracker != null) {
             observerTracker.stop();
@@ -219,7 +271,7 @@ public class CompositeNodeStoreService {
         nodeStoresInUse.clear();
     }
 
-    protected void bindNodeStore(NodeStoreProvider ns, Map<String, ?> config) {
+    protected void bindNodeStore(NodeStoreProvider ns, Map<String, ?> config) throws IOException, CommitFailedException {
         NodeStoreWithProps newNs = new NodeStoreWithProps(ns, config);
         nodeStores.add(newNs);
 
@@ -233,7 +285,7 @@ public class CompositeNodeStoreService {
         }
     }
 
-    protected void unbindNodeStore(NodeStoreProvider ns) {
+    protected void unbindNodeStore(NodeStoreProvider ns) throws IOException {
         Iterator<NodeStoreWithProps> it = nodeStores.iterator();
         while (it.hasNext()) {
             if (it.next().getNodeStoreProvider() == ns) {

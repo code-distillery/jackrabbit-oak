@@ -22,27 +22,24 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Properties;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.jcr.RepositoryException;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
-import org.apache.jackrabbit.core.data.CachingDataStore;
 import org.apache.jackrabbit.core.data.DataStoreException;
-import org.apache.jackrabbit.oak.blob.cloud.aws.s3.S3DataStore;
+import org.apache.jackrabbit.oak.blob.cloud.s3.S3DataStore;
 import org.apache.jackrabbit.oak.plugins.blob.datastore.DataStoreBlobStore;
 import org.apache.jackrabbit.oak.spi.blob.BlobStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.google.common.io.Closer;
 import com.google.common.io.Files;
+import org.apache.jackrabbit.oak.stats.DefaultStatisticsProvider;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 
 public class S3DataStoreFactory implements BlobStoreFactory {
-
-    private static final Logger log = LoggerFactory.getLogger(S3DataStoreFactory.class);
 
     private static final Pattern STRIP_VALUE_PATTERN = Pattern.compile("^[TILFDXSCB]?\"(.*)\"\\W*$");
 
@@ -78,12 +75,19 @@ public class S3DataStoreFactory implements BlobStoreFactory {
         S3DataStore delegate = new S3DataStore();
         delegate.setProperties(props);
         delegate.setPath(directory);
+
+        // Initialize a default stats provider
+        StatisticsProvider statsProvider = new DefaultStatisticsProvider(Executors.newSingleThreadScheduledExecutor());
+        delegate.setStatisticsProvider(statsProvider);
+        // Reduce staging purge interval to 60 seconds
+        delegate.setStagingPurgeInterval(60);
+
         try {
             delegate.init(tempHomeDir.getPath());
         } catch (RepositoryException e) {
             throw new IOException(e);
         }
-        closer.register(asCloseable(delegate, tempHomeDir));
+        closer.register(asCloseable(delegate));
         if (ignoreMissingBlobs) {
             return new SafeDataStoreBlobStore(delegate);
         } else {
@@ -91,21 +95,22 @@ public class S3DataStoreFactory implements BlobStoreFactory {
         }
     }
 
-    private static Closeable asCloseable(final CachingDataStore store, final File tempHomeDir) {
+    private static Closeable asCloseable(final S3DataStore store) {
         return new Closeable() {
             @Override
             public void close() throws IOException {
                 try {
-                    while (!store.getPendingUploads().isEmpty()) {
-                        log.info("Waiting for following uploads to finish: " + store.getPendingUploads());
-                        Thread.sleep(1000);
+                    while (store.getStats().get(1).getElementCount() > 0) {
+                        Thread.sleep(100);
                     }
-                    store.close();
-                    FileUtils.deleteDirectory(tempHomeDir);
-                } catch (DataStoreException e) {
-                    throw new IOException(e);
                 } catch (InterruptedException e) {
                     throw new IOException(e);
+                } finally {
+                    try {
+                        store.close();
+                    } catch (DataStoreException e) {
+                        throw new IOException(e);
+                    }
                 }
             }
         };

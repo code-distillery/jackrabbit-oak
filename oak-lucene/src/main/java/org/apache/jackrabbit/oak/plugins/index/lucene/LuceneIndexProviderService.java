@@ -239,7 +239,7 @@ public class LuceneIndexProviderService {
     )
     private static final String PROP_DISABLE_STORED_INDEX_DEFINITION = "disableStoredIndexDefinition";
 
-    private static final int PROP_DELETED_BLOB_COLLECTION_DEFAULT_INTERVAL = -1;
+    private static final int PROP_DELETED_BLOB_COLLECTION_DEFAULT_INTERVAL = 12*60*60;
     @Property(
             intValue = PROP_DELETED_BLOB_COLLECTION_DEFAULT_INTERVAL,
             label = "Time interval (in seconds) for actively removing deleted index blobs from blob store",
@@ -514,7 +514,7 @@ public class LuceneIndexProviderService {
 
     }
 
-    private ExecutorService getExecutorService(){
+    ExecutorService getExecutorService(){
         if (executorService == null){
             executorService = createExecutor();
         }
@@ -522,7 +522,7 @@ public class LuceneIndexProviderService {
     }
 
     private ExecutorService createExecutor() {
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(0, 5, 60L, TimeUnit.SECONDS,
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(5, 5, 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(), new ThreadFactory() {
             private final AtomicInteger counter = new AtomicInteger();
             private final Thread.UncaughtExceptionHandler handler = new Thread.UncaughtExceptionHandler() {

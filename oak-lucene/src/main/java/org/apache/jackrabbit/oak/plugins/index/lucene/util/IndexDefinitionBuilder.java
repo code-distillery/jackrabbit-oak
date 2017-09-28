@@ -33,9 +33,9 @@ import org.apache.jackrabbit.oak.api.Tree;
 import org.apache.jackrabbit.oak.api.Type;
 import org.apache.jackrabbit.oak.commons.PathUtils;
 import org.apache.jackrabbit.oak.plugins.index.IndexConstants;
-import org.apache.jackrabbit.oak.plugins.index.PathFilter;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexConstants;
 import org.apache.jackrabbit.oak.plugins.tree.TreeFactory;
+import org.apache.jackrabbit.oak.spi.filter.PathFilter;
 import org.apache.jackrabbit.oak.spi.state.EqualsDiff;
 import org.apache.jackrabbit.oak.spi.state.NodeBuilder;
 import org.apache.jackrabbit.oak.spi.state.NodeState;
@@ -97,6 +97,11 @@ public final class IndexDefinitionBuilder {
 
     public IndexDefinitionBuilder codec(String codecName){
         tree.setProperty(LuceneIndexConstants.CODEC_NAME, checkNotNull(codecName));
+        return this;
+    }
+
+    public IndexDefinitionBuilder mergePolicy(String mergePolicy) {
+        tree.setProperty(LuceneIndexConstants.MERGE_POLICY_NAME, checkNotNull(mergePolicy));
         return this;
     }
 
@@ -334,6 +339,11 @@ public final class IndexDefinitionBuilder {
             return this;
         }
 
+        public PropertyRule excludeFromAggregation(){
+            propTree.setProperty(LuceneIndexConstants.PROP_EXCLUDE_FROM_AGGREGATE, true);
+            return this;
+        }
+
         public PropertyRule notNullCheckEnabled(){
             propTree.setProperty(LuceneIndexConstants.PROP_NOT_NULL_CHECK_ENABLED, true);
             return this;
@@ -341,6 +351,21 @@ public final class IndexDefinitionBuilder {
 
         public PropertyRule weight(int weight){
             propTree.setProperty(LuceneIndexConstants.PROP_WEIGHT, weight);
+            return this;
+        }
+
+        public PropertyRule valuePattern(String valuePattern){
+            propTree.setProperty(IndexConstants.VALUE_PATTERN, valuePattern);
+            return this;
+        }
+
+        public PropertyRule valueExcludedPrefixes(String... values){
+            propTree.setProperty(IndexConstants.VALUE_EXCLUDED_PREFIXES, asList(values), STRINGS);
+            return this;
+        }
+
+        public PropertyRule valueIncludedPrefixes(String... values){
+            propTree.setProperty(IndexConstants.VALUE_INCLUDED_PREFIXES, asList(values), STRINGS);
             return this;
         }
 

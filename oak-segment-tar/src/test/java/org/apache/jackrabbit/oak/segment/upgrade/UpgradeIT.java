@@ -49,10 +49,8 @@ import org.junit.rules.TemporaryFolder;
 
 public class UpgradeIT {
 
-    private final File upgradeItHome = new File("target/upgrade-it");
-
     @Rule
-    public TemporaryFolder fileStoreHome = new TemporaryFolder(upgradeItHome);
+    public TemporaryFolder fileStoreHome = new TemporaryFolder(new File("target"));
 
     /**
      * Launch a groovy script in an Oak 1.6. console to initialise the upgrade
@@ -64,7 +62,7 @@ public class UpgradeIT {
                 "java", "-jar", "oak-run.jar",
                 "console", fileStoreHome.getRoot().getAbsolutePath(), "--read-write",
                 ":load create16store.groovy")
-                .directory(upgradeItHome)
+                .directory(new File("target", "upgrade-it"))
                 .redirectError(Redirect.INHERIT)
                 .redirectOutput(Redirect.INHERIT)
                 .redirectInput(Redirect.INHERIT)
@@ -100,14 +98,33 @@ public class UpgradeIT {
         Compact.builder()
                 .withPath(fileStoreHome.getRoot())
                 .withMmap(true)
+                .withForce(true)
                 .build()
                 .run();
+
+        // Upgraded
         checkStoreVersion(2);
         checkSegmentVersion(V_13);
     }
 
+    @Test
+    public void offRCUpgradesRequiresForce() throws IOException, InvalidFileStoreVersionException {
+        checkSegmentVersion(V_12);
+        checkStoreVersion(1);
+        Compact.builder()
+                .withPath(fileStoreHome.getRoot())
+                .withMmap(true)
+                .withForce(false)
+                .build()
+                .run();
+
+        // Not upgraded
+        checkStoreVersion(1);
+        checkSegmentVersion(V_12);
+    }
+
     private void checkStoreVersion(int version) throws IOException, InvalidFileStoreVersionException {
-        newManifestChecker(new File(fileStoreHome.getRoot(), "/manifest"),
+        newManifestChecker(new File(fileStoreHome.getRoot(), "manifest"),
                 true, version, version).checkManifest();
     }
 
